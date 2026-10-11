@@ -1,0 +1,475 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum UserRole {
+  SUPER_ADMIN
+  SCHOOL_MANAGER
+  BRANCH_MANAGER
+  QUALITY_ASSESSOR
+}
+
+enum UserStatus {
+  ACTIVE
+  INVITED
+  SUSPENDED
+}
+
+enum SchoolStatus {
+  ACTIVE
+  SUSPENDED
+  EXPIRED
+  PENDING
+}
+
+enum SubscriptionStatus {
+  ACTIVE
+  EXPIRING_SOON
+  EXPIRED
+  SUSPENDED
+}
+
+enum AssessmentStatus {
+  NOT_STARTED
+  IN_PROGRESS
+  COMPLETED
+}
+
+enum GapSeverity {
+  HIGH
+  MEDIUM
+  LOW
+}
+
+enum GapStatus {
+  OPEN
+  IN_PROGRESS
+  RESOLVED
+}
+
+model User {
+  id            String     @id @default(cuid())
+  name          String
+  email         String     @unique
+  password      String
+  role          UserRole
+  status        UserStatus @default(ACTIVE)
+  schoolId      String?
+  branchId      String?
+  createdAt     DateTime   @default(now())
+  updatedAt     DateTime   @updatedAt
+
+  school        School?    @relation(fields: [schoolId], references: [id])
+  branch        Branch?    @relation("BranchUsers", fields: [branchId], references: [id])
+  managedBranches Branch[] @relation("BranchManager")
+  assessments   Assessment[]
+  activities    Activity[]
+  
+  plansCreated    ImprovementPlan[] @relation("CreatedPlans")
+  actionsAssigned ImprovementAction[] @relation("AssignedActions")
+  followUpsCreated ImprovementFollowUp[] @relation("CreatedFollowUps")
+  evidenceUploaded Evidence[] @relation("UploadedEvidence")
+
+  @@index([schoolId])
+  @@index([branchId])
+  @@index([role])
+}
+
+model School {
+  id            String       @id @default(cuid())
+  name          String
+  nameEn        String?
+  schoolCode    String?      @unique
+  schoolType    String?
+  educationalStage String?
+  description   String?
+  logoUrl       String?
+  websiteUrl    String?
+  officialEmail String?
+  phone         String?
+  alternativePhone String?
+  location      String
+  country       String?      @default("مصر")
+  governorate   String?
+  city          String?
+  address       String?
+  postalCode    String?
+  establishedYear Int?
+  registrationNumber String?
+  academicYear  String?
+  studentCount  Int?
+  teacherCount  Int?
+  administrativeStaffCount Int?
+  buildingCount Int?
+  capacity      Int?
+  internalNotes String?
+  
+  status        SchoolStatus @default(ACTIVE)
+  createdAt     DateTime     @default(now())
+  updatedAt     DateTime     @updatedAt
+
+  branches      Branch[]
+  users         User[]
+  subscriptions Subscription[]
+  assessments   Assessment[]
+  gaps          Gap[]
+  plans         ImprovementPlan[]
+  activities    Activity[]
+  surveys       Survey[]
+}
+
+model Branch {
+  id            String       @id @default(cuid())
+  schoolId      String
+  name          String
+  location      String
+  phone         String?
+  managerId     String?
+  status        SchoolStatus @default(ACTIVE)
+  createdAt     DateTime     @default(now())
+  updatedAt     DateTime     @updatedAt
+
+  school        School       @relation(fields: [schoolId], references: [id], onDelete: Cascade)
+  manager       User?        @relation("BranchManager", fields: [managerId], references: [id])
+  users         User[]       @relation("BranchUsers")
+  assessments   Assessment[]
+  gaps          Gap[]
+  plans         ImprovementPlan[]
+  activities    Activity[]
+
+  @@index([schoolId])
+}
+
+model Subscription {
+  id            String             @id @default(cuid())
+  schoolId      String
+  plan          String
+  status        SubscriptionStatus
+  startDate     DateTime
+  endDate       DateTime
+  createdAt     DateTime           @default(now())
+  updatedAt     DateTime           @updatedAt
+
+  school        School             @relation(fields: [schoolId], references: [id], onDelete: Cascade)
+
+  @@index([schoolId])
+}
+
+model Domain {
+  id            String     @id @default(cuid())
+  name          String     @unique
+  description   String
+  axes          Axis[]
+  indicators    Indicator[]
+}
+
+model Axis {
+  id            String     @id @default(cuid())
+  domainId      String
+  name          String
+  domain        Domain     @relation(fields: [domainId], references: [id])
+  indicators    Indicator[]
+}
+
+model AssessmentTool {
+  id            String     @id @default(cuid())
+  name          String     @unique
+  indicators    Indicator[] @relation("IndicatorTools")
+}
+
+model Indicator {
+  id            String     @id @default(cuid())
+  domainId      String
+  axisId        String
+  code          String     @unique
+  description   String
+  targetStatus  String
+  guidePage     Int        @default(0)
+  coverage      String?    @default("مغطى")
+  evidenceCount Int        @default(0)
+  paragraphCount Int       @default(0)
+  
+  domain        Domain     @relation(fields: [domainId], references: [id])
+  axis          Axis       @relation(fields: [axisId], references: [id])
+  tools         AssessmentTool[] @relation("IndicatorTools")
+  
+  responses     AssessmentResponse[]
+  gaps          Gap[]
+  fixedEvidence FixedEvidence[]
+}
+
+model FixedEvidence {
+  id            String     @id @default(cuid())
+  code          String     @unique
+  text          String
+  tool          String
+  indicatorCode String
+  paragraphNo   Int?
+  paragraphText String?
+  indicatorId   String
+  indicator     Indicator  @relation(fields: [indicatorId], references: [id])
+  responses     EvidenceResponse[]
+}
+
+model Assessment {
+  id            String           @id @default(cuid())
+  schoolId      String
+  branchId      String?
+  assessorId    String
+  status        AssessmentStatus @default(NOT_STARTED)
+  progress      Int              @default(0)
+  score         Int              @default(0)
+  startedAt     DateTime         @default(now())
+  completedAt   DateTime?
+  createdAt     DateTime         @default(now())
+  updatedAt     DateTime         @updatedAt
+  submittedAt   DateTime?
+  cycle         String?   @default("2024-2025") // دورة التقييم
+  school        School           @relation(fields: [schoolId], references: [id])
+  branch        Branch?          @relation(fields: [branchId], references: [id])
+  assessor      User             @relation(fields: [assessorId], references: [id])
+  responses     AssessmentResponse[]
+  evidenceResponses EvidenceResponse[]
+  gaps          Gap[]
+  evidence      Evidence[]
+  plans         ImprovementPlan[]
+  type          String   @default("NORMAL") // NORMAL أو PRIVATE_REVIEW
+
+  @@index([assessorId])
+  @@index([schoolId, branchId, status])
+  @@index([cycle])
+}
+
+model AssessmentResponse {
+  id            String     @id @default(cuid())
+  assessmentId  String
+  indicatorId   String
+  notes         String?
+  createdAt     DateTime   @default(now())
+  updatedAt     DateTime   @updatedAt
+
+  assessment    Assessment @relation(fields: [assessmentId], references: [id], onDelete: Cascade)
+  indicator     Indicator  @relation(fields: [indicatorId], references: [id])
+
+  @@unique([assessmentId, indicatorId])
+}
+
+model EvidenceResponse {
+  id            String     @id @default(cuid())
+  assessmentId  String
+  evidenceId    String
+  isVerified    Boolean    @default(false)
+  visitNumber   Int?       // 1-7 for observations
+  scoreValue    Int?       // 1-4 for special cases
+  createdAt     DateTime   @default(now())
+  updatedAt     DateTime   @updatedAt
+
+  assessment    Assessment @relation(fields: [assessmentId], references: [id], onDelete: Cascade)
+  evidence      FixedEvidence @relation(fields: [evidenceId], references: [id])
+
+  @@unique([assessmentId, evidenceId, visitNumber])
+}
+
+model Gap {
+  id            String     @id @default(cuid())
+  schoolId      String
+  branchId      String?
+  assessmentId  String
+  indicatorId   String
+  description   String
+  severity      GapSeverity
+  status        GapStatus  @default(OPEN)
+  createdAt     DateTime   @default(now())
+  updatedAt     DateTime   @updatedAt
+
+  school        School     @relation(fields: [schoolId], references: [id])
+  branch        Branch?    @relation(fields: [branchId], references: [id])
+  assessment    Assessment @relation(fields: [assessmentId], references: [id])
+  indicator     Indicator  @relation(fields: [indicatorId], references: [id])
+  plans         ImprovementPlan[]
+
+  @@index([schoolId])
+  @@index([assessmentId])
+}
+
+model ImprovementPlan {
+  id            String   @id @default(cuid())
+  title         String
+  description   String?
+  schoolId      String
+  branchId      String?
+  assessmentId  String?
+  gapId         String?
+  indicatorId   String?
+  objective     String?
+  priority      String   @default("MEDIUM")
+  status        String   @default("DRAFT")
+  progress      Int      @default(0)
+  startDate     DateTime @default(now())
+  targetDate    DateTime
+  completedAt   DateTime?
+  createdById   String
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  // حقول التحليل و KPIs
+  baseline          Float?  // النسبة الحالية
+  targetPercentage  Float?  // النسبة المستهدفة
+  currentMeasured   Float?  // النسبة المقاسة حالياً
+  kpiName           String? // اسم مؤشر الأداء
+  successCriteria   String? // معايير النجاح
+  requiredSupport   String? // الدعم المطلوب
+  followUpMethod    String? // منهجية المتابعة
+  impactNotes       String? // ملاحظات قياس الأثر
+  
+  // الأسباب ونقاط القوة
+  reasons           String?
+  strengths         String?
+  improvements      String?
+
+  school        School   @relation(fields: [schoolId], references: [id])
+  branch        Branch?  @relation(fields: [branchId], references: [id])
+  assessment    Assessment? @relation(fields: [assessmentId], references: [id])
+  gap           Gap?     @relation(fields: [gapId], references: [id])
+  createdBy     User     @relation("CreatedPlans", fields: [createdById], references: [id])
+  actions       ImprovementAction[]
+  followUps     ImprovementFollowUp[]
+
+  @@index([schoolId])
+  @@index([gapId])
+}
+model ImprovementAction {
+  id                String   @id @default(cuid())
+  planId            String
+  title             String
+  description       String?
+  responsibleUserId String?
+  status            String   @default("PENDING")
+  startDate         DateTime?
+  dueDate           DateTime?
+  completedAt       DateTime?
+  progress          Int      @default(0)
+  notes             String?
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  plan              ImprovementPlan @relation(fields: [planId], references: [id], onDelete: Cascade)
+  responsible       User?    @relation("AssignedActions", fields: [responsibleUserId], references: [id])
+  followUps         ImprovementFollowUp[]
+
+  @@index([planId])
+}
+
+model ImprovementFollowUp {
+  id            String   @id @default(cuid())
+  planId        String
+  actionId      String?
+  createdById   String
+  note          String
+  progress      Int?
+  createdAt     DateTime @default(now())
+
+  plan          ImprovementPlan @relation(fields: [planId], references: [id], onDelete: Cascade)
+  action        ImprovementAction? @relation(fields: [actionId], references: [id])
+  createdBy     User     @relation("CreatedFollowUps", fields: [createdById], references: [id])
+
+  @@index([planId])
+}
+
+model Activity {
+  id            String     @id @default(cuid())
+  actorId       String
+  schoolId      String?
+  branchId      String?
+  action        String
+  entityType    String
+  entityId      String
+  metadata      Json?
+  createdAt     DateTime   @default(now())
+
+  actor         User       @relation(fields: [actorId], references: [id])
+  school        School?    @relation(fields: [schoolId], references: [id])
+  branch        Branch?    @relation(fields: [branchId], references: [id])
+
+  @@index([schoolId])
+  @@index([actorId])
+  @@index([branchId])
+}
+
+model Evidence {
+  id            String     @id @default(cuid())
+  assessmentId  String
+  uploadedById  String
+  type          String     
+  name          String
+  url           String
+  createdAt     DateTime   @default(now())
+
+  assessment    Assessment @relation(fields: [assessmentId], references: [id])
+  uploader      User       @relation("UploadedEvidence", fields: [uploadedById], references: [id])
+  
+  @@index([assessmentId])
+}
+
+model ContactMessage {
+  id          String   @id @default(cuid())
+  name        String
+  institution String?
+  email       String
+  phone       String?
+  subject     String
+  message     String
+  createdAt   DateTime @default(now())
+  isRead      Boolean  @default(false)
+}
+
+model Survey {
+  id            String   @id @default(cuid())
+  type          String
+  percentage    Float
+  indicatorId   String?
+  include       Boolean  @default(false)
+  note          String?
+  schoolId      String?
+  generalResult String?
+  createdAt     DateTime @default(now())
+
+  school        School?  @relation(fields: [schoolId], references: [id])
+}
+
+model BackupHistory {
+  id        String   @id @default(cuid())
+  type      String   // "Manual Export"
+  status    String   // "SUCCESS" | "FAILED"
+  fileSize  Int?
+  createdAt DateTime @default(now())
+}
+
+model Initiative {
+  id            String   @id @default(cuid())
+  name          String
+  entity        String?
+  targetGroup   String?
+  linkedPlanId  String?
+  idea          String?
+  generalGoals  String?
+  specialGoals  String?
+  indicators    Json?
+  programs      Json?
+  followUp      String?
+  duration      String?
+  evidenceText  String?
+  evidenceUrl   String?
+  impact        String?
+  sustainability String?
+  improvementPlan String?
+  schoolId      String?
+  createdById   String
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+}
