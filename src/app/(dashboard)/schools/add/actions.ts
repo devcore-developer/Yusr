@@ -12,10 +12,10 @@ export async function createSchoolAction(formData: FormData) {
   const location = (formData.get("location") as string)?.trim()
   const description = (formData.get("description") as string)?.trim() || null
   const phone = (formData.get("phone") as string)?.trim()
-  const email = (formData.get("email") as string)?.trim()
+  const officialEmail = (formData.get("email") as string)?.trim()
   const plan = (formData.get("plan") as string) || "Pro"
 
-  if (!name || !location || !phone || !email) {
+  if (!name || !location || !phone || !officialEmail) {
     throw new Error("الحقول المطلوبة ناقصة")
   }
 
@@ -25,7 +25,7 @@ export async function createSchoolAction(formData: FormData) {
       description,
       location,
       phone,
-      email,
+      officialEmail,
       status: SchoolStatus.ACTIVE,
       subscriptions: {
         create: {

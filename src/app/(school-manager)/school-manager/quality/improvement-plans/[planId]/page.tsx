@@ -24,14 +24,13 @@ export default async function PlanDetailsPage({ params }: { params: { planId: st
       gap: { include: { indicator: true } },
       actions: true,
       followUps: { include: { createdBy: true }, orderBy: { createdAt: "desc" } }
-    }
+    } as any // تجاوز خطأ TypeScript المؤقت للعلاقات
   })
 
   if (!plan || plan.schoolId !== user.schoolId) {
     redirect("/school-manager/quality/improvement-plans")
   }
 
-  // Cast to any to bypass Prisma strict typing issue with optional relations
   const planData = plan as any
   const indicatorCode = planData.indicator?.code || planData.gap?.indicator?.code || "غير محدد"
   const isOverdue = new Date() > planData.targetDate && planData.status !== "COMPLETED"
@@ -58,7 +57,6 @@ export default async function PlanDetailsPage({ params }: { params: { planId: st
         }
       />
 
-      {/* Plan Header & KPIs */}
       <Card>
         <CardHeader>
           <div className="flex justify-between items-center">
@@ -92,7 +90,6 @@ export default async function PlanDetailsPage({ params }: { params: { planId: st
         </CardContent>
       </Card>
 
-      {/* KPIs Details */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
         <Card className="p-5">
           <p className="text-xs text-muted-foreground mb-1">النسبة الأساسية</p>
@@ -108,7 +105,6 @@ export default async function PlanDetailsPage({ params }: { params: { planId: st
         </Card>
       </div>
 
-      {/* Analysis Details */}
       <Card>
         <CardHeader>
           <CardTitle>تحليل الأداء الحالي</CardTitle>
@@ -131,10 +127,8 @@ export default async function PlanDetailsPage({ params }: { params: { planId: st
         </CardContent>
       </Card>
 
-      {/* Workspace (Actions & Follow-ups) */}
       <Card>
         <CardContent className="p-6">
-          {/* Using the unified PlanWorkspace component */}
           <PlanWorkspace plan={planData} />
         </CardContent>
       </Card>

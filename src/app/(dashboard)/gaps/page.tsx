@@ -28,14 +28,14 @@ export default async function GapsPage() {
     orderBy: [{ severity: "desc" }, { createdAt: "desc" }],
   })
 
-  const indicatorIds = [...new Set(gaps.map(g => g.indicatorId))]
+  const indicatorIds = Array.from(new Set(gaps.map(g => g.indicatorId)))
   const evidenceCounts = await prisma.fixedEvidence.groupBy({
     by: ['indicatorId'],
     where: { indicatorId: { in: indicatorIds } },
     _count: true
   })
 
-  const assessmentIds = [...new Set(gaps.map(g => g.assessmentId))]
+  const assessmentIds = Array.from(new Set(gaps.map(g => g.assessmentId)))
   const verifiedCounts = await prisma.evidenceResponse.groupBy({
     by: ['assessmentId'],
     where: { 

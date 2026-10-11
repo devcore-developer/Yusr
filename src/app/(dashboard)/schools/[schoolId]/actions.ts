@@ -41,22 +41,23 @@ export async function activateSchoolAction(schoolId: string) {
   revalidatePath(`/schools/${schoolId}`)
   revalidatePath("/schools")
 }
+
 export async function updateSchoolAction(schoolId: string, formData: FormData) {
   await requireRole(["SUPER_ADMIN"])
 
   const name = (formData.get("name") as string)?.trim()
   const location = (formData.get("location") as string)?.trim()
   const phone = (formData.get("phone") as string)?.trim()
-  const email = (formData.get("email") as string)?.trim()
+  const officialEmail = (formData.get("email") as string)?.trim()
   const description = (formData.get("description") as string)?.trim() || null
 
-  if (!name || !location || !phone || !email) {
+  if (!name || !location || !phone || !officialEmail) {
     throw new Error("الحقول المطلوبة ناقصة")
   }
 
   await prisma.school.update({
     where: { id: schoolId },
-    data: { name, location, phone, email, description },
+    data: { name, location, phone, officialEmail, description },
   })
 
   revalidatePath(`/schools/${schoolId}`)

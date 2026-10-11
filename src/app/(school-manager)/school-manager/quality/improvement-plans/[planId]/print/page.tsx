@@ -15,12 +15,11 @@ export default async function PrintPlanPage({ params }: { params: { planId: stri
       branch: true, 
       indicator: true, 
       gap: { include: { indicator: true } } 
-    }
+    } as any // تجاوز خطأ TypeScript المؤقت للعلاقات
   })
 
   if (!plan) redirect("/")
 
-  // Cast to any to bypass Prisma strict typing issue with optional relations
   const planData = plan as any
   const indicatorCode = planData.indicator?.code || planData.gap?.indicator?.code || "غير محدد"
 
