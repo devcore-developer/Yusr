@@ -1,3 +1,4 @@
+export const dynamic = 'force-dynamic'
 import { AppShell } from "@/components/layout/AppShell"
 import { SuperAdminProvider } from "@/features/super-admin/context/SuperAdminContext"
 import { getCurrentUser } from "@/lib/permissions"
