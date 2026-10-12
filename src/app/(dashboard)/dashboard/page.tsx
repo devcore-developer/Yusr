@@ -1,68 +1,84 @@
 import { prisma } from "@/lib/prisma"
 import { getCurrentUser } from "@/lib/permissions"
 import { redirect } from "next/navigation"
+import Link from "next/link"
 import { PageHeader } from "@/components/layout/PageHeader"
-import { StatCard } from "@/components/dashboard/StatCard"
-import { DomainAnalysis, DomainStat } from "@/components/dashboard/DomainAnalysis"
-import { ResponseAnalysis } from "@/components/dashboard/ResponseAnalysis"
-import { RecentAssessments } from "@/components/dashboard/RecentAssessments"
-import { AttentionRequired, AlertItem } from "@/components/dashboard/AttentionRequired"
-import { RecentActivity } from "@/components/dashboard/RecentActivity"
-import { RecentSchools } from "@/components/dashboard/RecentSchools"
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/Card"
 import { Button } from "@/components/ui/Button"
-import { School, Building2, ClipboardCheck, AlertTriangle, RefreshCw } from "lucide-react"
+import { DonutChart, VerticalBarChart, HorizontalBarChart, PerformanceLegend } from "@/components/charts/AnalyticsCharts"
+import { getPerformanceLevel } from "@/lib/performance"
+import { School, Building2, Users, ClipboardCheck, AlertTriangle, FileCheck, RefreshCw, ArrowLeft } from "lucide-react"
 
 export default async function Home() {
   const user = await getCurrentUser()
   if (!user) redirect("/login")
-
   if (user.role === "SCHOOL_MANAGER" || user.role === "BRANCH_MANAGER") redirect("/school-manager")
   if (user.role === "QUALITY_ASSESSOR") redirect("/quality-assessor")
   if (user.role !== "SUPER_ADMIN") redirect("/login")
 
   const [
-    schoolsCount, branchesCount, usersCount, gaps, activeAssessments, completedAssessments,
-    openGaps, verifiedEvidence, recentActivities, recentSchools, recentAssessmentsRaw,
-    expiringSubs, delayedPlans, suspendedSchools, highSeverityGaps
+    schoolsCount, branchesCount, usersCount, assessmentsCount, activeGaps, plansCount,
+    schools, domains, verifiedEvidence, topGaps
   ] = await Promise.all([
     prisma.school.count(),
     prisma.branch.count(),
     prisma.user.count(),
-    prisma.gap.count(),
-    prisma.assessment.count({ where: { status: "IN_PROGRESS" } }),
-    prisma.assessment.count({ where: { status: "COMPLETED" } }),
-    prisma.gap.count({ where: { status: "OPEN" } }),
+    prisma.assessment.count({ where: { type: { not: "PRIVATE_REVIEW" } } }),
+    prisma.gap.count({ where: { status: "OPEN", assessment: { type: { not: "PRIVATE_REVIEW" } } } }),
+    prisma.improvementPlan.count(),
+    prisma.school.findMany({ include: { _count: { select: { branches: true } }, assessments: { where: { type: { not: "PRIVATE_REVIEW" } } } } }),
+    prisma.domain.findMany({ include: { indicators: { include: { fixedEvidence: true } } } }),
     prisma.evidenceResponse.findMany({
-      where: { isVerified: true },
-      select: { evidence: { select: { indicator: { select: { domain: { select: { id: true, name: true } } } } } } },
+      where: { isVerified: true, assessment: { type: { not: "PRIVATE_REVIEW" } } },
+      include: { evidence: { include: { indicator: { include: { domain: true } } } } }
     }),
-    prisma.activity.findMany({ take: 6, orderBy: { createdAt: "desc" }, include: { actor: { select: { name: true } }, school: { select: { name: true } } } }),
-    prisma.school.findMany({ take: 4, orderBy: { createdAt: "desc" }, include: { _count: { select: { branches: true, users: true } } } }),
-    prisma.assessment.findMany({ take: 5, orderBy: { startedAt: "desc" }, include: { school: { select: { id: true, name: true } }, branch: { select: { name: true } }, assessor: { select: { name: true } } } }),
-    prisma.subscription.findMany({ where: { endDate: { lte: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000) }, status: { in: ["ACTIVE", "EXPIRING_SOON"] } }, include: { school: { select: { id: true, name: true } } } }),
-    prisma.improvementPlan.findMany({ where: { targetDate: { lt: new Date() }, status: { not: "COMPLETED" } }, take: 4, include: { school: { select: { id: true, name: true } } } }),
-    prisma.school.findMany({ where: { status: "SUSPENDED" }, take: 4, select: { id: true, name: true } }),
-    prisma.gap.findMany({ where: { severity: "HIGH", status: "OPEN" }, take: 4, include: { school: { select: { id: true, name: true } } } }),
+    // جلب أبرز الفجوات المفتوحة
+    prisma.gap.findMany({
+      where: { status: "OPEN", assessment: { type: { not: "PRIVATE_REVIEW" } } },
+      take: 5,
+      orderBy: [{ severity: "desc" }, { createdAt: "desc" }],
+      include: { indicator: { include: { domain: true } }, school: { select: { name: true } } }
+    })
   ])
 
-  const presentCount = verifiedEvidence.length
-  const notPresentCount = gaps
+  // 1. Domain Performance Calculation
+  const domainPerformance = domains.map(d => {
+    const req = d.indicators.reduce((acc, i) => acc + i.fixedEvidence.length, 0)
+    const ver = verifiedEvidence.filter(v => v.evidence.indicator.domain.id === d.id).length
+    return { name: d.name, percentage: req > 0 ? Math.round((ver / req) * 100) : null }
+  })
 
-  const domainMap: Record<string, { id: string; name: string; present: number; notPresent: number; notApplicable: number; total: number }> = {}
-  for (const r of verifiedEvidence) {
-    const d = r.evidence.indicator.domain
-    if (!domainMap[d.id]) domainMap[d.id] = { id: d.id, name: d.name, present: 0, notPresent: 0, notApplicable: 0, total: 0 }
-    domainMap[d.id].present++
-    domainMap[d.id].total++
-  }
-  const domainStats: DomainStat[] = Object.values(domainMap).map(d => ({ ...d, score: d.total > 0 ? Math.round((d.present / d.total) * 100) : 0 }))
+  // 2. Indicator Distribution Calculation
+  const distributionData = [
+    { label: 'التميز', value: 0, color: '#16A34A' },
+    { label: 'التقدم', value: 0, color: '#2878B8' },
+    { label: 'الانطلاق', value: 0, color: '#E9A34A' },
+    { label: 'التهيئة', value: 0, color: '#C62828' },
+    { label: 'غير مقيم', value: 0, color: '#858B95' },
+  ]
+  domains.forEach(d => d.indicators.forEach(ind => {
+    const req = ind.fixedEvidence.length
+    const ver = verifiedEvidence.filter(v => v.evidence.indicatorId === ind.id).length
+    const pct = req > 0 ? Math.round((ver / req) * 100) : null
+    const level = getPerformanceLevel(pct)
+    const distItem = distributionData.find(item => item.label === level.label)
+    if (distItem) distItem.value++
+  }))
 
-  const alerts: AlertItem[] = []
-  for (const sub of expiringSubs) alerts.push({ id: `sub-${sub.id}`, type: 'EXPIRING_SUBSCRIPTION', severity: 'warning', message: `اشتراك ينتهي خلال ${Math.ceil((sub.endDate.getTime() - Date.now()) / (1000 * 60 * 60 * 24))} يوم`, context: sub.school.name, href: `/subscriptions` })
-  for (const plan of delayedPlans) alerts.push({ id: `plan-${plan.id}`, type: 'DELAYED_PLAN', severity: 'warning', message: 'خطة تحسين متأخرة', context: plan.school.name, href: `/schools/${plan.schoolId}` })
-  for (const school of suspendedSchools) alerts.push({ id: `school-${school.id}`, type: 'SUSPENDED_SCHOOL', severity: 'danger', message: 'مدرسة موقوفة', context: school.name, href: `/schools/${school.id}` })
-  for (const gap of highSeverityGaps) alerts.push({ id: `gap-${gap.id}`, type: 'HIGH_GAP', severity: 'danger', message: 'فجوة عالية الأولوية', context: gap.school.name, href: `/schools/${gap.schoolId}` })
-  alerts.sort((a, b) => (a.severity === 'danger' ? -1 : 1) - (b.severity === 'danger' ? -1 : 1))
+  // 3. School Comparison (Top 5)
+  const schoolComparison = schools.map(s => {
+    const progress = s.assessments.length > 0 ? Math.round(s.assessments.reduce((acc, a) => acc + a.progress, 0) / s.assessments.length) : 0
+    return { name: s.name, percentage: progress > 0 ? progress : null }
+  }).sort((a, b) => (b.percentage || 0) - (a.percentage || 0)).slice(0, 5)
+
+  const kpis = [
+    { label: "المدارس", value: schoolsCount, icon: School, color: "text-cyan-600 bg-cyan-50" },
+    { label: "الفروع", value: branchesCount, icon: Building2, color: "text-blue-600 bg-blue-50" },
+    { label: "المستخدمون", value: usersCount, icon: Users, color: "text-violet-600 bg-violet-50" },
+    { label: "التقييمات", value: assessmentsCount, icon: ClipboardCheck, color: "text-amber-600 bg-amber-50" },
+    { label: "الفجوات المفتوحة", value: activeGaps, icon: AlertTriangle, color: "text-red-600 bg-red-50" },
+    { label: "خطط التحسين", value: plansCount, icon: FileCheck, color: "text-green-600 bg-green-50" },
+  ]
 
   return (
     <div className="space-y-6 lg:space-y-8">
@@ -70,32 +86,89 @@ export default async function Home() {
         title="تحليلات الجودة الشاملة"
         description="نظرة تنفيذية على أداء المدارس والتقييمات والفجوات وخطط التحسين."
         breadcrumbs={[{ label: 'الرئيسية', href: '/' }, { label: 'لوحة التحكم' }]}
-        actions={<Button variant="outline" size="md" icon={<RefreshCw className="w-4 h-4" />} iconPosition="start">تحديث البيانات</Button>}
+        actions={<Button variant="outline" size="md" icon={<RefreshCw className="w-4 h-4" />}>تحديث</Button>}
       />
 
-      {/* KPI Cards */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 lg:gap-5">
-        <StatCard label="إجمالي المدارس" value={schoolsCount} icon={<School className="w-5 h-5" />} tone="success" context={`${schoolsCount} مدرسة مسجلة`} />
-        <StatCard label="إجمالي الفروع" value={branchesCount} icon={<Building2 className="w-5 h-5" />} tone="info" context={`${branchesCount} فرع نشط`} />
-        <StatCard label="تقييمات نشطة" value={activeAssessments} icon={<ClipboardCheck className="w-5 h-5" />} tone="amber" status={{ label: `${completedAssessments} مكتمل`, tone: 'success' }} />
-        <StatCard label="فجوات مفتوحة" value={openGaps} icon={<AlertTriangle className="w-5 h-5" />} tone="danger" context={`${gaps} إجمالي الفجوات`} />
+      {/* KPI Grid */}
+      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
+        {kpis.map((kpi, i) => (
+          <Card key={i} className="p-4">
+            <div className={`w-10 h-10 rounded-lg flex items-center justify-center mb-3 ${kpi.color}`}>
+              <kpi.icon className="w-5 h-5" />
+            </div>
+            <p className="text-2xl font-bold text-slate-900">{kpi.value}</p>
+            <p className="text-xs text-slate-500 mt-1">{kpi.label}</p>
+          </Card>
+        ))}
       </div>
 
-      {/* Main Analytics Row - Balanced Grid */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 lg:gap-6">
-        <div className="lg:col-span-2"><RecentAssessments assessments={recentAssessmentsRaw} /></div>
-        <ResponseAnalysis present={presentCount} notPresent={notPresentCount} notApplicable={0} />
+      {/* Analytics Row 1 */}
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        <Card className="lg:col-span-2 p-6">
+          <CardHeader className="px-0 pt-0">
+            <CardTitle>أداء المجالات الأربعة</CardTitle>
+          </CardHeader>
+          <CardContent className="px-0">
+            <VerticalBarChart data={domainPerformance} />
+          </CardContent>
+        </Card>
+        <Card className="p-6">
+          <CardHeader className="px-0 pt-0">
+            <CardTitle>توزيع مستويات الأداء</CardTitle>
+          </CardHeader>
+          <CardContent className="px-0 flex justify-center">
+            <DonutChart data={distributionData} />
+          </CardContent>
+        </Card>
       </div>
 
-      <DomainAnalysis domains={domainStats} />
-
-      {/* Activity & Alerts Row */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 lg:gap-6">
-        <AttentionRequired alerts={alerts} />
-        <RecentActivity activities={recentActivities} />
+      {/* Analytics Row 2 & Top Gaps */}
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        <Card className="lg:col-span-2 p-6">
+          <CardHeader className="px-0 pt-0">
+            <CardTitle>مقارنة أداء المدارس (أعلى 5)</CardTitle>
+          </CardHeader>
+          <CardContent className="px-0">
+            <HorizontalBarChart data={schoolComparison} />
+          </CardContent>
+        </Card>
+        
+        {/* Top Gaps Card */}
+        <Card className="p-6 flex flex-col">
+          <CardHeader className="px-0 pt-0 flex-row items-center justify-between">
+            <CardTitle>أبرز الفجوات</CardTitle>
+            <Link href="/gaps" className="text-xs text-cyan-600 hover:underline flex items-center gap-1">
+              عرض الكل <ArrowLeft className="w-3 h-3" />
+            </Link>
+          </CardHeader>
+          <CardContent className="px-0 flex-1 overflow-hidden">
+            {topGaps.length === 0 ? (
+              <div className="h-full flex items-center justify-center text-sm text-slate-400 text-center py-4">
+                لا توجد فجوات مفتوحة حالياً.
+              </div>
+            ) : (
+              <div className="space-y-3">
+                {topGaps.map(gap => (
+                  <Link href={`/quality-assessor/assessments/${gap.assessmentId}`} key={gap.id} className="block p-2 -mx-2 rounded-lg hover:bg-slate-50 transition-colors">
+                    <div className="flex items-center gap-2 mb-1">
+                      <span className={`w-2 h-2 rounded-full ${gap.severity === 'HIGH' ? 'bg-red-500' : 'bg-amber-500'}`}></span>
+                      <span className="text-xs font-mono text-slate-500">{gap.indicator.code}</span>
+                      <span className="text-xs text-slate-400 truncate">- {gap.school.name}</span>
+                    </div>
+                    <p className="text-xs text-slate-700 line-clamp-2 pr-4">{gap.description}</p>
+                  </Link>
+                ))}
+              </div>
+            )}
+          </CardContent>
+        </Card>
       </div>
+      
+      {/* Legend */}
+      <Card className="p-4">
+        <PerformanceLegend />
+      </Card>
 
-      <RecentSchools schools={recentSchools} />
     </div>
   )
 }

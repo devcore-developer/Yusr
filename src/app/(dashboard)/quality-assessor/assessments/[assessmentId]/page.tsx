@@ -72,6 +72,7 @@ export default async function AssessmentPage({ params }: { params: { assessmentI
         assessment={JSON.parse(JSON.stringify(assessment))}
         domains={JSON.parse(JSON.stringify(domains))}
         initialResponses={JSON.parse(JSON.stringify(assessment.responses))}
+        userRole={user.role} // أضف هذا السطر
       />
     </div>
   )

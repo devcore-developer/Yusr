@@ -91,6 +91,7 @@
     -moz-osx-font-smoothing: grayscale;
     /* تحسين إظهار الخط العربي */
     font-synthesis: none;
+    font-weight: 500; /* زيادة وزن الخط الافتراضي قليلاً لتحسين القراءة */
   }
   
   h1, h2, h3, h4, h5, h6 {

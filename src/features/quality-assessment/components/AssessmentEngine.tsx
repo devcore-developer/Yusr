@@ -17,6 +17,7 @@ interface AssessmentEngineProps {
   assessment: any
   domains: any[]
   initialResponses: any[]
+  userRole?: string
 }
 
 const TOOLS = [
@@ -29,7 +30,7 @@ const TOOLS = [
   "مقابلة الموجه الطلابي"
 ]
 
-export function AssessmentEngine({ assessment, domains, initialResponses }: AssessmentEngineProps) {
+export function AssessmentEngine({ assessment, domains, initialResponses, userRole }: AssessmentEngineProps) {
   const [activeTool, setActiveTool] = useState(TOOLS[0])
   const [activeVisit, setActiveVisit] = useState(1)
   const [responses, setResponses] = useState<Map<string, any>>(
@@ -41,7 +42,7 @@ export function AssessmentEngine({ assessment, domains, initialResponses }: Asse
   const [detailsEvidence, setDetailsEvidence] = useState<any | null>(null)
 
   const isCompleted = assessment.status === "COMPLETED"
-  const isObservation = activeTool === "الملاحظة الصفية"
+  const isReadOnly = isCompleted || (userRole === "SUPER_ADMIN" && assessment.type !== "PRIVATE_REVIEW")
 
   const allIndicators = useMemo(() => {
     return domains.flatMap((d: any) => d.axes.flatMap((ax: any) => ax.indicators))
@@ -51,7 +52,6 @@ export function AssessmentEngine({ assessment, domains, initialResponses }: Asse
     return allIndicators.flatMap((i: any) => i.fixedEvidence)
   }, [allIndicators])
 
-  // Group evidence by tool
   const toolData = useMemo(() => {
     return TOOLS.map(toolName => {
       const evidence = allEvidence.filter((e: any) => e.tool === toolName)
@@ -82,7 +82,9 @@ export function AssessmentEngine({ assessment, domains, initialResponses }: Asse
   const activeToolData = toolData.find(t => t.name === activeTool)
 
   const handleEvidenceChange = async (evidenceId: string, checked: boolean, scoreValue?: number) => {
-    const visit = isObservation ? activeVisit : 0
+    if (isReadOnly) return
+
+    const visit = activeTool === "الملاحظة الصفية" ? activeVisit : 0
     const key = `${evidenceId}-${visit}`
     
     setResponses(prev => {
@@ -110,12 +112,12 @@ export function AssessmentEngine({ assessment, domains, initialResponses }: Asse
   }
 
   const isEvidenceChecked = (evidenceId: string) => {
-    const visit = isObservation ? activeVisit : 0
+    const visit = activeTool === "الملاحظة الصفية" ? activeVisit : 0
     return responses.has(`${evidenceId}-${visit}`)
   }
 
   const getScoreValue = (evidenceId: string) => {
-    const visit = isObservation ? activeVisit : 0
+    const visit = activeTool === "الملاحظة الصفية" ? activeVisit : 0
     return responses.get(`${evidenceId}-${visit}`)?.scoreValue || 0
   }
 
@@ -132,10 +134,9 @@ export function AssessmentEngine({ assessment, domains, initialResponses }: Asse
 
   return (
     <div className="space-y-6 overflow-x-hidden">
-      {/* Header Summary Card */}
       <Card className="border-border/70 shadow-premium overflow-hidden">
         <CardContent className="p-5 lg:p-6">
-          <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-6">
+          <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-6 min-w-0">
             <div className="flex items-start gap-4 min-w-0">
               <div className="w-12 h-12 rounded-xl bg-primary/10 flex items-center justify-center shrink-0">
                 <ClipboardCheck className="w-6 h-6 text-primary" strokeWidth={2} />
@@ -174,7 +175,7 @@ export function AssessmentEngine({ assessment, domains, initialResponses }: Asse
                 </div>
               </div>
               {!isCompleted && (
-                <Button variant="success" size="md" icon={<CheckCircle className="w-4 h-4" />} onClick={() => setIsFinishOpen(true)}>
+                <Button variant="success" size="md" icon={<CheckCircle className="w-4 h-4" />} onClick={() => setIsFinishOpen(true)} disabled={isReadOnly}>
                   إنهاء التقييم
                 </Button>
               )}
@@ -183,19 +184,14 @@ export function AssessmentEngine({ assessment, domains, initialResponses }: Asse
         </CardContent>
       </Card>
 
-      {/* Mobile sidebar toggle */}
       <div className="lg:hidden flex items-center justify-between p-2.5 bg-surface border border-border rounded-lg sticky top-16 z-20 shadow-sm">
         <Button variant="outline" size="sm" icon={sidebarOpen ? <X className="w-4 h-4" /> : <Menu className="w-4 h-4" />} onClick={() => setSidebarOpen(!sidebarOpen)}>
           التنقل
         </Button>
       </div>
 
-      {/* تمت إضافة min-w-0 هنا لمنع التمدد الأفقي */}
       <div className="flex flex-col lg:flex-row gap-6 min-w-0">
-        {/* Main Content */}
-        {/* تمت إضافة min-w-0 هنا أيضاً */}
         <div className="flex-1 min-w-0 space-y-6">
-          {/* Tool Tabs */}
           <div className="flex flex-wrap gap-2 pb-2 border-b border-border">
             {toolData.map((tool) => {
               const toolVerified = tool.evidence.filter((e: any) => isEvidenceChecked(e.id)).length
@@ -217,10 +213,8 @@ export function AssessmentEngine({ assessment, domains, initialResponses }: Asse
             })}
           </div>
 
-          {/* Tool Content */}
           {activeToolData && (
             <>
-              {/* Tool Summary Card */}
               <Card className="p-4 flex flex-col md:flex-row items-start md:items-center justify-between gap-4 bg-surface-muted/30">
                 <div className="flex items-center gap-3 min-w-0">
                   <Wrench className="w-5 h-5 text-primary shrink-0" />
@@ -238,8 +232,7 @@ export function AssessmentEngine({ assessment, domains, initialResponses }: Asse
                 </div>
               </Card>
 
-              {/* Observation Visit Selector */}
-              {isObservation && (
+              {activeTool === "الملاحظة الصفية" && (
                 <Card className="p-4 flex flex-col md:flex-row gap-4 items-start md:items-center justify-between">
                   <div className="flex items-center gap-2 shrink-0">
                     <Calendar className="w-5 h-5 text-primary" />
@@ -262,7 +255,6 @@ export function AssessmentEngine({ assessment, domains, initialResponses }: Asse
                 </Card>
               )}
 
-              {/* Paragraph Accordion List */}
               <div className="space-y-3 min-w-0">
                 {activeToolData.grouped.length === 0 ? (
                   <Card className="p-12 text-center">
@@ -272,7 +264,6 @@ export function AssessmentEngine({ assessment, domains, initialResponses }: Asse
                 ) : (
                   activeToolData.grouped.map((group: any) => (
                     <div key={group.indicator.id} className="space-y-3 min-w-0">
-                      {/* Indicator Header */}
                       <div className="px-4 py-2 bg-primary/5 rounded-lg border border-primary/10 min-w-0">
                         <div className="flex items-start gap-3">
                           <Badge variant="neutral" className="font-mono numeric shrink-0 text-[11px] mt-0.5">{group.indicator.code}</Badge>
@@ -280,7 +271,6 @@ export function AssessmentEngine({ assessment, domains, initialResponses }: Asse
                         </div>
                       </div>
 
-                      {/* Paragraphs */}
                       {Object.values(group.paragraphs).map((para: any) => (
                         <ParagraphAccordion
                           key={`${group.indicator.id}-${para.no}`}
@@ -289,7 +279,7 @@ export function AssessmentEngine({ assessment, domains, initialResponses }: Asse
                           getScore={getScoreValue}
                           onToggle={handleEvidenceChange}
                           onDetails={setDetailsEvidence}
-                          isCompleted={isCompleted}
+                          isReadOnly={isReadOnly}
                           savingId={savingId}
                         />
                       ))}
@@ -301,7 +291,6 @@ export function AssessmentEngine({ assessment, domains, initialResponses }: Asse
           )}
         </div>
 
-        {/* Right Side Overview (Desktop) */}
         <aside className="hidden lg:block w-72 flex-shrink-0">
           <div className="sticky top-20 space-y-4">
             <Card className="p-4">
@@ -336,7 +325,6 @@ export function AssessmentEngine({ assessment, domains, initialResponses }: Asse
         </aside>
       </div>
 
-      {/* Details Modal */}
       <Modal 
         isOpen={!!detailsEvidence} 
         onClose={() => setDetailsEvidence(null)} 
@@ -369,7 +357,6 @@ export function AssessmentEngine({ assessment, domains, initialResponses }: Asse
         )}
       </Modal>
 
-      {/* Finish Modal */}
       <Modal isOpen={isFinishOpen} onClose={() => setIsFinishOpen(false)} title="تأكيد إنهاء التقييم" description="لن تتمكن من تعديل الإجابات بعد الإنهاء.">
         <div className="space-y-4">
           <div className="grid grid-cols-2 gap-3">
@@ -392,8 +379,7 @@ export function AssessmentEngine({ assessment, domains, initialResponses }: Asse
   )
 }
 
-// ===== Paragraph Accordion Component =====
-function ParagraphAccordion({ para, isChecked, getScore, onToggle, onDetails, isCompleted, savingId }: any) {
+function ParagraphAccordion({ para, isChecked, getScore, onToggle, onDetails, isReadOnly, savingId }: any) {
   const [isOpen, setIsOpen] = useState(false)
   const verifiedCount = para.items.filter((e: any) => isChecked(e.id)).length
   const totalCount = para.items.length
@@ -401,7 +387,6 @@ function ParagraphAccordion({ para, isChecked, getScore, onToggle, onDetails, is
 
   return (
     <Card className="overflow-hidden">
-      {/* Accordion Header */}
       <button 
         onClick={() => setIsOpen(!isOpen)}
         className="w-full p-4 flex items-center justify-between gap-4 hover:bg-surface-muted/50 transition-smooth"
@@ -421,10 +406,8 @@ function ParagraphAccordion({ para, isChecked, getScore, onToggle, onDetails, is
         </div>
       </button>
 
-      {/* Accordion Content */}
       {isOpen && (
         <div className="border-t border-border bg-surface-muted/20">
-          {/* تم تغيير overflow-x-auto إلى overflow-hidden وإضافة table-fixed لمنع التمدد الأفقي */}
           <div className="w-full overflow-hidden">
             <table className="w-full table-fixed text-sm text-right">
               <colgroup>
@@ -450,14 +433,13 @@ function ParagraphAccordion({ para, isChecked, getScore, onToggle, onDetails, is
                   return (
                     <tr key={ev.id} className={cn("transition-smooth", checked ? "bg-success/5" : "hover:bg-surface-muted/50")}>
                       <td className="px-4 py-3 text-muted-foreground numeric align-top">{idx + 1}</td>
-                      {/* إضافة break-words و whitespace-normal لجعل النص ينزل لسطر جديد */}
                       <td className="px-4 py-3 text-foreground-strong break-words whitespace-normal">{ev.text}</td>
                       <td className="px-4 py-3 align-top">
                         {isSpecial ? (
                           <select
                             value={score}
                             onChange={(e) => onToggle(ev.id, Number(e.target.value) > 0, Number(e.target.value))}
-                            disabled={isCompleted}
+                            disabled={isReadOnly}
                             className="h-8 px-2 rounded-md border border-border bg-surface text-xs focus:outline-none focus:ring-2 focus:ring-secondary/30 w-full"
                           >
                             <option value="0">اختر</option>
@@ -469,10 +451,11 @@ function ParagraphAccordion({ para, isChecked, getScore, onToggle, onDetails, is
                         ) : (
                           <button
                             onClick={() => onToggle(ev.id, !checked)}
-                            disabled={isCompleted}
+                            disabled={isReadOnly}
                             className={cn(
                               "w-6 h-6 rounded flex items-center justify-center transition-smooth border-2",
-                              checked ? "bg-success border-success text-white" : "border-border bg-surface"
+                              checked ? "bg-success border-success text-white" : "border-border bg-surface",
+                              isReadOnly && "opacity-50 cursor-not-allowed"
                             )}
                           >
                             {checked && <CheckCircle className="w-4 h-4" />}

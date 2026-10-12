@@ -4,7 +4,7 @@ import Link from "next/link"
 import { usePathname } from "next/navigation"
 import { useState, useRef, useEffect, useCallback } from "react"
 import Image from "next/image"
-import { GraduationCap, ChevronUp, Settings, LogOut } from "lucide-react"
+import { ChevronUp, Settings, LogOut } from "lucide-react"
 import { Avatar } from "@/components/ui/Avatar"
 import { getNavItems, NavItem } from "@/config/navigation"
 import { signOut } from "next-auth/react"
@@ -88,28 +88,28 @@ export function Sidebar({ role, user }: SidebarProps) {
   })
 
   return (
-    <aside className="w-[280px] bg-primary text-primary-foreground flex flex-col h-screen fixed right-0 top-0 z-40">
+    <aside className="w-[280px] bg-[#073B43] text-white flex flex-col h-screen fixed right-0 top-0 z-40 border-l border-[#0A4650]">
       {/* Brand Logo (YUSR) */}
-      <div className="h-14 flex items-center px-5 shrink-0">
+      <div className="h-16 flex items-center px-5 shrink-0 border-b border-white/5">
         <div className="flex items-center gap-2.5">
           <div className="relative w-8 h-8 shrink-0">
             <Image src="/logo.png" alt="YUSR Logo" fill className="object-contain rounded-lg" priority />
           </div>
           <div className="flex flex-col leading-none">
             <span className="text-lg font-bold tracking-tight text-white">يُــــسر</span>
-            <span className="text-[10px] text-primary-100/50 mt-0.5">إدارة الجودة</span>
+            <span className="text-[10px] text-cyan-300/70 mt-0.5">إدارة الجودة</span>
           </div>
         </div>
       </div>
 
-      <nav className="flex-1 overflow-y-auto py-3 px-3 scrollbar-thin">
+      <nav className="flex-1 overflow-y-auto py-4 px-3 scrollbar-thin">
         {sortedGroups.map((key) => {
           const groupItems = grouped[key]
           if (!groupItems || !groupItems.length) return null
           return (
-            <div key={key} className="mb-4 last:mb-0">
-              <h3 className="px-2.5 mb-1.5 text-[10px] font-semibold text-primary-100/40 uppercase tracking-wider">{key}</h3>
-              <ul className="space-y-0.5">
+            <div key={key} className="mb-6 last:mb-0">
+              <h3 className="px-3 mb-2 text-[10px] font-semibold text-slate-400 uppercase tracking-wider">{key}</h3>
+              <ul className="space-y-1">
                 {groupItems.map((item) => {
                   const isActive = item.href === activeHref
                   const Icon = item.icon
@@ -118,11 +118,19 @@ export function Sidebar({ role, user }: SidebarProps) {
                       <Link
                         href={item.href}
                         className={cn(
-                          "group flex items-center gap-2.5 px-2.5 py-2 rounded-lg text-[13px] font-medium transition-smooth",
-                          isActive ? "bg-secondary text-white shadow-sm" : "text-primary-100/70 hover:bg-primary-800/40 hover:text-white"
+                          "group flex items-center gap-2.5 px-3 py-2.5 rounded-lg text-[13px] font-medium transition-all",
+                          isActive 
+                            ? "bg-cyan-500/15 text-cyan-300 shadow-sm border-r-2 border-cyan-400" 
+                            : "text-slate-300 hover:bg-white/5 hover:text-white"
                         )}
                       >
-                        <Icon className={cn("w-[18px] h-[18px] shrink-0 transition-smooth", isActive ? "text-white" : "text-primary-100/50 group-hover:text-white")} strokeWidth={isActive ? 2.3 : 2} />
+                        <Icon
+                          className={cn(
+                            "w-[18px] h-[18px] shrink-0",
+                            isActive ? "text-cyan-300" : "text-slate-400 group-hover:text-white"
+                          )}
+                          strokeWidth={isActive ? 2.5 : 2}
+                        />
                         <span className="truncate">{item.title}</span>
                       </Link>
                     </li>
@@ -134,35 +142,44 @@ export function Sidebar({ role, user }: SidebarProps) {
         })}
       </nav>
 
-      <div ref={menuRef} className="relative border-t border-primary-900/30 shrink-0">
-        <button onClick={() => setMenuOpen(!menuOpen)} className={cn("w-full flex items-center gap-2.5 px-3 py-2.5 transition-smooth text-right", menuOpen ? "bg-primary-800/40" : "hover:bg-primary-800/30")} aria-expanded={menuOpen} aria-haspopup="menu" aria-label="حساب المستخدم">
+      <div ref={menuRef} className="relative border-t border-white/5 shrink-0">
+        <button 
+          onClick={() => setMenuOpen(!menuOpen)} 
+          className={cn(
+            "w-full flex items-center gap-2.5 px-3 py-3 transition-smooth text-right", 
+            menuOpen ? "bg-white/5" : "hover:bg-white/5"
+          )} 
+          aria-expanded={menuOpen} 
+          aria-haspopup="menu" 
+          aria-label="حساب المستخدم"
+        >
           <Avatar name={userName} src={user?.image} size="sm" className="shrink-0" />
           <div className="flex-1 min-w-0 text-right">
             <p className="text-[13px] font-medium text-white truncate">{userName}</p>
-            <p className="text-[11px] text-primary-100/50 truncate">{userEmail}</p>
+            <p className="text-[11px] text-slate-400 truncate">{userEmail}</p>
           </div>
-          <ChevronUp className={cn("w-4 h-4 text-primary-100/40 transition-transform shrink-0", menuOpen && "rotate-180")} />
+          <ChevronUp className={cn("w-4 h-4 text-slate-400 transition-transform shrink-0", menuOpen && "rotate-180")} />
         </button>
 
         {menuOpen && (
-          <div className="absolute bottom-full left-2 right-2 mb-1 bg-surface border border-border rounded-lg shadow-lg py-1 z-50" role="menu">
-            <div className="px-3 py-2 border-b border-border">
-              <p className="text-sm font-medium text-foreground-strong truncate">{userName}</p>
-              <p className="text-[12px] text-muted-foreground truncate">{userEmail}</p>
+          <div className="absolute bottom-full left-2 right-2 mb-1 bg-white border border-slate-200 rounded-lg shadow-xl py-1 z-50" role="menu">
+            <div className="px-3 py-2 border-b border-slate-100">
+              <p className="text-sm font-medium text-slate-900 truncate">{userName}</p>
+              <p className="text-[12px] text-slate-500 truncate">{userEmail}</p>
             </div>
             <div className="py-1">
               {accountItems.map((item) => {
                 const Icon = item.icon
                 return (
-                  <Link key={item.href} href={item.href} onClick={() => setMenuOpen(false)} className="flex items-center gap-2.5 px-3 py-2 text-[13px] text-foreground hover:bg-surface-muted transition-smooth" role="menuitem">
-                    <Icon className="w-4 h-4 text-muted-foreground" />
+                  <Link key={item.href} href={item.href} onClick={() => setMenuOpen(false)} className="flex items-center gap-2.5 px-3 py-2 text-[13px] text-slate-700 hover:bg-slate-50 transition-smooth" role="menuitem">
+                    <Icon className="w-4 h-4 text-slate-400" />
                     {item.label}
                   </Link>
                 )
               })}
             </div>
-            <div className="border-t border-border pt-1">
-              <button onClick={handleLogout} className="w-full flex items-center gap-2.5 px-3 py-2 text-[13px] text-danger hover:bg-danger/5 transition-smooth text-right" role="menuitem">
+            <div className="border-t border-slate-100 pt-1">
+              <button onClick={handleLogout} className="w-full flex items-center gap-2.5 px-3 py-2 text-[13px] text-red-600 hover:bg-red-50 transition-smooth text-right" role="menuitem">
                 <LogOut className="w-4 h-4" />
                 تسجيل الخروج
               </button>
