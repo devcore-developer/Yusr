@@ -4,40 +4,36 @@ import { redirect } from "next/navigation"
 import { PageHeader } from "@/components/layout/PageHeader"
 import { AssessmentEngine } from "@/features/quality-assessment/components/AssessmentEngine"
 import { Badge } from "@/components/ui/Badge"
+import { Card, CardContent } from "@/components/ui/Card"
 
 export default async function AssessmentPage({ params }: { params: { assessmentId: string } }) {
   const user = await getCurrentUser()
   
-  // 1. السماح للمقيم، السوبر أدمن، مدير المدرسة، ومدير الفرع بالدخول للصفحة
   if (!user || !["QUALITY_ASSESSOR", "SUPER_ADMIN", "SCHOOL_MANAGER", "BRANCH_MANAGER"].includes(user.role)) {
     redirect("/login")
   }
 
   const assessment = await prisma.assessment.findUnique({
     where: { id: params.assessmentId },
-    include: { school: true, branch: true, responses: true },
+    include: { 
+      school: true, 
+      branch: true,
+      evidenceResponses: true,
+      responses: true,
+      attachments: true
+    },
   })
 
   if (!assessment) redirect("/quality-assessor")
 
-  // 2. التحقق من الملكية والنطاق (Tenant Isolation)
   if (user.role === "SUPER_ADMIN") {
-    // السوبر أدمن يرى كل شيء (للقراءة فقط كما أعددنا سابقاً)
+    // Allowed
   } else if (user.role === "SCHOOL_MANAGER") {
-    // مدير المدرسة يجب أن يكون نفس مدرسة التقييم
-    if (assessment.schoolId !== user.schoolId) {
-      redirect("/quality-assessor")
-    }
+    if (assessment.schoolId !== user.schoolId) redirect("/quality-assessor")
   } else if (user.role === "BRANCH_MANAGER") {
-    // مدير الفرع يجب أن يكون نفس فرع التقييم
-    if (assessment.branchId !== user.branchId) {
-      redirect("/quality-assessor")
-    }
-  } else if (user.role === "QUALITY_ASSESSOR") {
-    // المقيم يجب أن يكون هو المسؤول عن التقييم
-    if (assessment.assessorId !== user.id) {
-      redirect("/quality-assessor")
-    }
+    if (assessment.branchId !== user.branchId) redirect("/quality-assessor")
+  } else if (assessment.assessorId !== user.id) {
+    redirect("/quality-assessor")
   }
 
   const domains = await prisma.domain.findMany({
@@ -47,7 +43,9 @@ export default async function AssessmentPage({ params }: { params: { assessmentI
           indicators: {
             include: {
               tools: true,
-              fixedEvidence: true
+              fixedEvidence: {
+                orderBy: { paragraphNo: 'asc' } // <--- الإصلاح الأول
+              }
             }
           } 
         } 
@@ -71,8 +69,11 @@ export default async function AssessmentPage({ params }: { params: { assessmentI
       <AssessmentEngine
         assessment={JSON.parse(JSON.stringify(assessment))}
         domains={JSON.parse(JSON.stringify(domains))}
-        initialResponses={JSON.parse(JSON.stringify(assessment.responses))}
-        userRole={user.role} // أضف هذا السطر
+        initialEvidenceResponses={JSON.parse(JSON.stringify(assessment.evidenceResponses))}
+        initialNotesResponses={JSON.parse(JSON.stringify(assessment.responses))}
+        initialAttachments={JSON.parse(JSON.stringify(assessment.attachments))}
+        userRole={user.role}
+        userId={user.id} // أضف هذا السطر
       />
     </div>
   )

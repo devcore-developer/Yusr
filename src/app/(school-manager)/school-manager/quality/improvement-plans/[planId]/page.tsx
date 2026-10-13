@@ -15,16 +15,16 @@ export default async function PlanDetailsPage({ params }: { params: { planId: st
   const user = await getCurrentUser()
   if (!user?.schoolId) redirect("/login")
 
+  // تمت إزالة `indicator: true` من الاستعلام لتجنب خطأ Prisma
   const plan = await prisma.improvementPlan.findUnique({
     where: { id: params.planId },
     include: {
       school: true,
       branch: true,
-      indicator: true,
       gap: { include: { indicator: true } },
       actions: true,
       followUps: { include: { createdBy: true }, orderBy: { createdAt: "desc" } }
-    } as any // تجاوز خطأ TypeScript المؤقت للعلاقات
+    } as any
   })
 
   if (!plan || plan.schoolId !== user.schoolId) {
@@ -32,7 +32,8 @@ export default async function PlanDetailsPage({ params }: { params: { planId: st
   }
 
   const planData = plan as any
-  const indicatorCode = planData.indicator?.code || planData.gap?.indicator?.code || "غير محدد"
+  // جلب كود المؤشر من علاقة الفجوة (gap) بدلاً من علاقة مباشرة غير موجودة
+  const indicatorCode = planData.gap?.indicator?.code || "غير محدد"
   const isOverdue = new Date() > planData.targetDate && planData.status !== "COMPLETED"
 
   return (
@@ -57,6 +58,7 @@ export default async function PlanDetailsPage({ params }: { params: { planId: st
         }
       />
 
+      {/* Plan Header & KPIs */}
       <Card>
         <CardHeader>
           <div className="flex justify-between items-center">
@@ -90,6 +92,7 @@ export default async function PlanDetailsPage({ params }: { params: { planId: st
         </CardContent>
       </Card>
 
+      {/* KPIs Details */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
         <Card className="p-5">
           <p className="text-xs text-muted-foreground mb-1">النسبة الأساسية</p>
@@ -105,6 +108,7 @@ export default async function PlanDetailsPage({ params }: { params: { planId: st
         </Card>
       </div>
 
+      {/* Analysis Details */}
       <Card>
         <CardHeader>
           <CardTitle>تحليل الأداء الحالي</CardTitle>
@@ -127,6 +131,7 @@ export default async function PlanDetailsPage({ params }: { params: { planId: st
         </CardContent>
       </Card>
 
+      {/* Workspace (Actions & Follow-ups) */}
       <Card>
         <CardContent className="p-6">
           <PlanWorkspace plan={planData} />

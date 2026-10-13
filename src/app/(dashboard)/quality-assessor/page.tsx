@@ -7,8 +7,9 @@ import { Progress } from "@/components/ui/Progress"
 import { PageHeader } from "@/components/layout/PageHeader"
 import Link from "next/link"
 import { formatDate } from "@/lib/utils"
-import { ClipboardCheck, CheckCircle, Clock, ArrowLeft, GitCompare } from "lucide-react"
+import { ClipboardCheck, CheckCircle, Clock, ArrowLeft, Plus } from "lucide-react"
 import { AssessmentComparisonSelector } from "@/features/quality-assessment/components/AssessmentComparisonSelector"
+import { createNewAssessment } from "@/features/quality-assessment/actions"
 
 export default async function AssessorDashboard() {
   const user = await getCurrentUser()
@@ -32,6 +33,7 @@ export default async function AssessorDashboard() {
   const active = assessments.filter(a => a.status === "IN_PROGRESS")
   const completed = assessments.filter(a => a.status === "COMPLETED")
   const isSuperAdmin = user.role === "SUPER_ADMIN"
+  const canCreate = ["QUALITY_ASSESSOR", "SCHOOL_MANAGER", "BRANCH_MANAGER"].includes(user.role)
 
   return (
     <div className="space-y-8">
@@ -39,6 +41,15 @@ export default async function AssessorDashboard() {
         title={isSuperAdmin ? "نتائج التقييمات" : "لوحة تحكم التقييمات"}
         description={isSuperAdmin ? "استعراض جميع تقييمات الجودة المسجلة في المنصة." : `أهلاً بك، ${user.name}. يمكنك متابعة التقييمات وإكمالها.`}
         breadcrumbs={[{ label: 'الرئيسية', href: '/' }, { label: 'التقييمات' }]}
+        actions={
+          canCreate ? (
+            <form action={createNewAssessment}>
+              <Button type="submit" variant="primary" size="md" icon={<Plus className="w-4 h-4" />}>
+                تقييم جديد
+              </Button>
+            </form>
+          ) : undefined
+        }
       />
 
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">

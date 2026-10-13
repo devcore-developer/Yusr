@@ -6,7 +6,7 @@ import { Input } from "@/components/ui/Input"
 import { Select } from "@/components/ui/Select"
 import { Badge } from "@/components/ui/Badge"
 import { addAction, updateActionProgress, addFollowUp } from "../actions"
-import { Loader2, PlusCircle, CheckCircle, XCircle, Clock, AlertCircle } from "lucide-react"
+import { Loader2, PlusCircle, CheckCircle, XCircle, Clock, AlertCircle, Save } from "lucide-react"
 import { cn } from "@/lib/utils"
 
 interface PlanWorkspaceProps {
@@ -21,7 +21,9 @@ export function PlanWorkspace({ plan }: PlanWorkspaceProps) {
   const [newActionDate, setNewActionDate] = useState("")
   
   const [followUpNote, setFollowUpNote] = useState("")
-  const [followUpProgress, setFollowUpProgress] = useState(0)
+  const [actionChanges, setActionChanges] = useState<Record<string, { progress: number; status: string }>>({})
+  const [savingActionId, setSavingActionId] = useState<string | null>(null)
+  const [savedActionId, setSavedActionId] = useState<string | null>(null)
 
   const handleAddAction = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -31,7 +33,7 @@ export function PlanWorkspace({ plan }: PlanWorkspaceProps) {
     const formData = new FormData()
     formData.append("title", newActionTitle)
     formData.append("status", "PENDING")
-    formData.append("dueDate", newActionDate)
+    if (newActionDate) formData.append("dueDate", newActionDate)
     
     try {
       await addAction(plan.id, formData)
@@ -43,11 +45,66 @@ export function PlanWorkspace({ plan }: PlanWorkspaceProps) {
     setLoadingAction(false)
   }
 
-  const handleUpdateStatus = async (actionId: string, status: string) => {
+  const handleStatusChange = (actionId: string, newStatus: string, currentProgress: number) => {
+    let newProgress = currentProgress;
+
+    // مزامنة النسبة مع الحالة في الواجهة فوراً
+    if (newStatus === "COMPLETED") {
+      newProgress = 100;
+    } else if (newStatus === "PENDING") {
+      newProgress = 0;
+    } else {
+      // جارية أو متعثرة
+      if (currentProgress === 100) newProgress = 99; // لا يمكن أن تبقى 100%
+      if (currentProgress === 0 && newStatus === "IN_PROGRESS") {
+        // السماح ببقائها 0 أو يمكن تركها للمستخدم، سنبقيها 0
+      }
+    }
+
+    setActionChanges(prev => ({
+      ...prev,
+      [actionId]: { progress: newProgress, status: newStatus }
+    }));
+  };
+
+  const handleProgressChange = (actionId: string, value: number, currentStatus: string) => {
+    // منع إدخال 100% إذا لم تكن الحالة "مكتملة"
+    if (value >= 100 && currentStatus !== "COMPLETED") {
+      value = 99;
+    }
+    // منع إدخال رقم سالب
+    if (value < 0) value = 0;
+
+    setActionChanges(prev => ({
+      ...prev,
+      [actionId]: { progress: value, status: currentStatus }
+    }));
+  };
+
+  const handleUpdateAction = async (actionId: string) => {
+    const changes = actionChanges[actionId]
+    if (!changes) return
+
+    setSavingActionId(actionId)
+    setSavedActionId(null)
+
     try {
-      await updateActionProgress(actionId, status, plan.id)
+      await updateActionProgress(actionId, changes.status, plan.id, changes.progress)
+      
+      setActionChanges(prev => {
+        const newState = { ...prev }
+        delete newState[actionId]
+        return newState
+      })
+
+      setSavedActionId(actionId)
+      setTimeout(() => setSavedActionId(null), 2000)
+
     } catch (error) {
-      console.error(error)
+      console.error("Save error:", error)
+      alert("حدث خطأ أثناء الحفظ.")
+    } finally {
+      setSavingActionId(null)
     }
   }
 
@@ -58,12 +115,10 @@ export function PlanWorkspace({ plan }: PlanWorkspaceProps) {
     
     const formData = new FormData()
     formData.append("note", followUpNote)
-    formData.append("progress", String(followUpProgress))
     
     try {
       await addFollowUp(plan.id, formData)
       setFollowUpNote("")
-      setFollowUpProgress(0)
     } catch (error) {
       console.error(error)
     }
@@ -76,31 +131,86 @@ export function PlanWorkspace({ plan }: PlanWorkspaceProps) {
       <div className="space-y-4">
         <h3 className="text-lg font-bold text-foreground-strong">إجراءات التحسين</h3>
         <div className="divide-y divide-border border border-border rounded-lg">
-          {plan.actions?.map((action: any) => (
-            <div key={action.id} className="p-4 flex items-center justify-between gap-4">
-              <div className="flex-1">
-                <p className="text-sm font-medium text-foreground-strong">{action.title}</p>
-                <p className="text-xs text-muted-foreground mt-1">
-                  {action.dueDate ? `المستهدف: ${new Date(action.dueDate).toLocaleDateString('ar-SA')}` : "لا يوجد تاريخ مستهدف"}
-                </p>
+          {plan.actions?.map((action: any) => {
+            const currentProgress = actionChanges[action.id]?.progress ?? action.progress ?? 0
+            const currentStatus = actionChanges[action.id]?.status ?? action.status
+            const hasChanges = !!actionChanges[action.id]
+            const isSaving = savingActionId === action.id
+            const isSaved = savedActionId === action.id
+            const isDisabled = currentStatus === "COMPLETED" || currentStatus === "PENDING"
+
+            return (
+              <div key={action.id} className="p-4 flex flex-col gap-3">
+                <div className="flex items-center justify-between gap-4 flex-wrap">
+                  <div className="flex-1 min-w-[200px]">
+                    <p className="text-sm font-medium text-foreground-strong">{action.title}</p>
+                    <p className="text-xs text-muted-foreground mt-1">
+                      المستهدف: {action.dueDate ? new Date(action.dueDate).toLocaleDateString('ar-SA') : "غير محدد"}
+                    </p>
+                  </div>
+                  
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <div className="flex items-center gap-1">
+                      <Input 
+                        type="number" 
+                        min="0" 
+                        max="100" 
+                        value={currentProgress}
+                        onChange={(e) => handleProgressChange(action.id, Number(e.target.value), currentStatus)}
+                        className="h-8 text-xs w-20"
+                        disabled={isDisabled || isSaving} // تعطيل الحقل إذا كانت مكتملة أو لم تبدأ
+                      />
+                      <span className="text-xs text-muted-foreground">%</span>
+                    </div>
+
+                    <Select 
+                      value={currentStatus}
+                      onChange={(e) => handleStatusChange(action.id, e.target.value, currentProgress)}
+                      className="h-8 text-xs w-32"
+                      disabled={isSaving}
+                    >
+                      <option value="PENDING">لم تبدأ</option>
+                      <option value="IN_PROGRESS">جارية</option>
+                      <option value="COMPLETED">مكتملة</option>
+                      <option value="DELAYED">متعثرة</option>
+                    </Select>
+
+                    <div className="w-4 h-4 flex items-center justify-center">
+                      {currentStatus === "COMPLETED" && <CheckCircle className="w-4 h-4 text-success" />}
+                      {currentStatus === "DELAYED" && <AlertCircle className="w-4 h-4 text-danger" />}
+                      {currentStatus === "IN_PROGRESS" && <Clock className="w-4 h-4 text-warning" />}
+                    </div>
+
+                    <div className="w-24 flex justify-end">
+                      {isSaving ? (
+                        <div className="flex items-center gap-1 text-xs text-muted-foreground">
+                          <Loader2 className="w-3 h-3 animate-spin" />
+                          <span>جاري الحفظ...</span>
+                        </div>
+                      ) : isSaved ? (
+                        <div className="flex items-center gap-1 text-xs text-success">
+                          <CheckCircle className="w-3 h-3" />
+                          <span>تم الحفظ</span>
+                        </div>
+                      ) : (
+                        <Button 
+                          type="button" 
+                          variant="outline" 
+                          size="sm" 
+                          className="h-8 px-2 text-xs"
+                          onClick={() => handleUpdateAction(action.id)}
+                          disabled={!hasChanges || isSaving}
+                        >
+                          <Save className="w-3 h-3 ml-1" />
+                          حفظ
+                        </Button>
+                      )}
+                    </div>
+                  </div>
+                </div>
               </div>
-              <div className="flex items-center gap-2">
-                <Select 
-                  defaultValue={action.status} 
-                  onChange={(e) => handleUpdateStatus(action.id, e.target.value)}
-                  className="h-8 text-xs w-32"
-                >
-                  <option value="PENDING">لم يبدأ</option>
-                  <option value="IN_PROGRESS">جارية</option>
-                  <option value="COMPLETED">مكتملة</option>
-                  <option value="DELAYED">متعثرة</option>
-                </Select>
-                {action.status === "COMPLETED" && <CheckCircle className="w-4 h-4 text-success" />}
-                {action.status === "DELAYED" && <AlertCircle className="w-4 h-4 text-danger" />}
-                {action.status === "IN_PROGRESS" && <Clock className="w-4 h-4 text-warning" />}
-              </div>
-            </div>
-          ))}
+            )
+          })}
         </div>
 
         {/* Add New Action Form */}
@@ -155,21 +265,9 @@ export function PlanWorkspace({ plan }: PlanWorkspaceProps) {
               required 
             />
           </div>
-          <div className="flex items-center gap-4">
-            <div className="space-y-1 flex-1">
-              <label className="text-sm font-medium">نسبة الإنجاز الحالية (%)</label>
-              <Input 
-                type="number" 
-                min="0" 
-                max="100" 
-                value={followUpProgress} 
-                onChange={(e) => setFollowUpProgress(Number(e.target.value))} 
-              />
-            </div>
-            <Button type="submit" disabled={loadingFollowUp} size="md" icon={loadingFollowUp ? <Loader2 className="w-4 h-4 animate-spin" /> : <PlusCircle className="w-4 h-4" />}>
-              حفظ المتابعة
-            </Button>
-          </div>
+          <Button type="submit" disabled={loadingFollowUp} size="md" icon={loadingFollowUp ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}>
+            حفظ المتابعة
+          </Button>
         </form>
       </div>
     </div>

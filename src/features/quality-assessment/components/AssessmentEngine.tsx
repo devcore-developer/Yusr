@@ -1,23 +1,27 @@
 "use client"
 
-import { useState, useMemo } from "react"
+import { useState, useMemo, useEffect } from "react"
 import { Card, CardContent } from "@/components/ui/Card"
 import { Button } from "@/components/ui/Button"
 import { Badge } from "@/components/ui/Badge"
 import { Progress } from "@/components/ui/Progress"
 import { Modal } from "@/components/ui/Modal"
 import { cn } from "@/lib/utils"
-import { saveEvidenceResponse, finishAssessment } from "../actions"
+import { saveEvidenceResponse, finishAssessment, uploadAttachment, deleteAttachment } from "../actions"
 import {
   CheckCircle, Menu, X, ClipboardCheck, Building2, 
-  Loader2, Hash, Wrench, Calendar, ChevronDown, FileText, AlertTriangle
+  Loader2, Hash, Wrench, Calendar, ChevronDown, 
+  Upload, Trash2, FileText
 } from "lucide-react"
 
 interface AssessmentEngineProps {
   assessment: any
   domains: any[]
-  initialResponses: any[]
+  initialEvidenceResponses: any[]
+  initialNotesResponses: any[]
+  initialAttachments: any[]
   userRole?: string
+  userId?: string
 }
 
 const TOOLS = [
@@ -30,27 +34,35 @@ const TOOLS = [
   "مقابلة الموجه الطلابي"
 ]
 
-export function AssessmentEngine({ assessment, domains, initialResponses, userRole }: AssessmentEngineProps) {
+export function AssessmentEngine({ assessment, domains, initialEvidenceResponses, initialNotesResponses, initialAttachments, userRole, userId }: AssessmentEngineProps) {
   const [activeTool, setActiveTool] = useState(TOOLS[0])
   const [activeVisit, setActiveVisit] = useState(1)
   const [responses, setResponses] = useState<Map<string, any>>(
-    new Map(initialResponses.map((r: any) => [`${r.evidenceId}-${r.visitNumber || 0}`, r]))
+    new Map(initialEvidenceResponses.filter((r: any) => r.isVerified).map((r: any) => [`${r.evidenceId}-${r.visitNumber || 0}`, r]))
   )
+  const [attachments, setAttachments] = useState<any[]>(initialAttachments)
   const [savingId, setSavingId] = useState<string | null>(null)
   const [isFinishOpen, setIsFinishOpen] = useState(false)
-  const [sidebarOpen, setSidebarOpen] = useState(false)
   const [detailsEvidence, setDetailsEvidence] = useState<any | null>(null)
+  
+  // إدارة حالة الطي للفقرات
+  const [collapsedParagraphs, setCollapsedParagraphs] = useState<Set<string>>(new Set())
+
+  const toggleParagraph = (indicatorId: string, paraNo: number) => {
+    const key = `${indicatorId}-${paraNo}`
+    setCollapsedParagraphs(prev => {
+      const newSet = new Set(prev)
+      if (newSet.has(key)) newSet.delete(key)
+      else newSet.add(key)
+      return newSet
+    })
+  }
 
   const isCompleted = assessment.status === "COMPLETED"
-  const isReadOnly = isCompleted || (userRole === "SUPER_ADMIN" && assessment.type !== "PRIVATE_REVIEW")
+  const isReadOnly = isCompleted || (userRole === "SUPER_ADMIN" ? assessment.type !== "PRIVATE_REVIEW" : userId !== assessment.assessorId)
 
-  const allIndicators = useMemo(() => {
-    return domains.flatMap((d: any) => d.axes.flatMap((ax: any) => ax.indicators))
-  }, [domains])
-
-  const allEvidence = useMemo(() => {
-    return allIndicators.flatMap((i: any) => i.fixedEvidence)
-  }, [allIndicators])
+  const allIndicators = useMemo(() => domains.flatMap((d: any) => d.axes.flatMap((ax: any) => ax.indicators)), [domains])
+  const allEvidence = useMemo(() => allIndicators.flatMap((i: any) => i.fixedEvidence), [allIndicators])
 
   const toolData = useMemo(() => {
     return TOOLS.map(toolName => {
@@ -60,22 +72,30 @@ export function AssessmentEngine({ assessment, domains, initialResponses, userRo
       evidence.forEach((ev: any) => {
         const ind = allIndicators.find((i: any) => i.id === ev.indicatorId)
         if (!ind) return
+        if (!groupedByIndicator[ind.code]) groupedByIndicator[ind.code] = { indicator: ind, paragraphs: [] }
         
-        if (!groupedByIndicator[ind.code]) {
-          groupedByIndicator[ind.code] = { indicator: ind, paragraphs: {} }
+        const pNo = Number(ev.paragraphNo) || 0
+        let para = groupedByIndicator[ind.code].paragraphs.find((p: any) => p.no === pNo)
+        if (!para) {
+          para = { no: pNo, title: ev.paragraphText || "فقرة التقييم", items: [] }
+          groupedByIndicator[ind.code].paragraphs.push(para)
         }
-        const pNo = ev.paragraphNo || 0
-        if (!groupedByIndicator[ind.code].paragraphs[pNo]) {
-          groupedByIndicator[ind.code].paragraphs[pNo] = {
-            no: pNo,
-            title: ev.paragraphText || "فقرة التقييم",
-            items: []
-          }
-        }
-        groupedByIndicator[ind.code].paragraphs[pNo].items.push(ev)
+        para.items.push(ev)
       })
       
-      return { name: toolName, evidence, grouped: Object.values(groupedByIndicator) }
+      const groupedArray = Object.values(groupedByIndicator)
+
+      groupedArray.sort((a: any, b: any) => {
+        const aNo = a.paragraphs[0]?.no ?? 0
+        const bNo = b.paragraphs[0]?.no ?? 0
+        return Number(aNo) - Number(bNo)
+      })
+
+      groupedArray.forEach((g: any) => {
+        g.paragraphs.sort((a: any, b: any) => Number(a.no) - Number(b.no))
+      })
+      
+      return { name: toolName, evidence, grouped: groupedArray }
     })
   }, [allEvidence, allIndicators])
 
@@ -83,17 +103,13 @@ export function AssessmentEngine({ assessment, domains, initialResponses, userRo
 
   const handleEvidenceChange = async (evidenceId: string, checked: boolean, scoreValue?: number) => {
     if (isReadOnly) return
-
     const visit = activeTool === "الملاحظة الصفية" ? activeVisit : 0
     const key = `${evidenceId}-${visit}`
     
     setResponses(prev => {
       const newMap = new Map(prev)
-      if (checked || scoreValue) {
-        newMap.set(key, { evidenceId, visitNumber: visit, isVerified: true, scoreValue })
-      } else {
-        newMap.delete(key)
-      }
+      if (checked || scoreValue) newMap.set(key, { evidenceId, visitNumber: visit, isVerified: true, scoreValue })
+      else newMap.delete(key)
       return newMap
     })
 
@@ -107,18 +123,43 @@ export function AssessmentEngine({ assessment, domains, initialResponses, userRo
         else newMap.set(key, { evidenceId, visitNumber: visit, isVerified: true })
         return newMap
       })
+      alert("حدث خطأ أثناء الحفظ. تأكد من أنك مالك هذا التقييم.")
     }
     setSavingId(null)
+  }
+
+  const handleFileUpload = async (evidenceId: string, file: File) => {
+    if (isReadOnly) return
+    if (file.size > 2 * 1024 * 1024) {
+      alert("حجم الملف يتجاوز 2 ميجابايت")
+      return
+    }
+    const reader = new FileReader()
+    reader.onload = async () => {
+      const base64Data = reader.result as string
+      try {
+        const res = await uploadAttachment(assessment.id, evidenceId, { name: file.name, type: file.type, size: file.size, data: base64Data })
+        setAttachments(prev => [...prev, { id: res.id, evidenceId, fileName: file.name, fileType: file.type, fileData: base64Data }])
+      } catch (err) {
+        alert("فشل رفع الملف")
+      }
+    }
+    reader.readAsDataURL(file)
+  }
+
+  const handleDeleteAttachment = async (attachmentId: string) => {
+    if (isReadOnly) return
+    try {
+      await deleteAttachment(attachmentId, assessment.id)
+      setAttachments(prev => prev.filter(a => a.id !== attachmentId))
+    } catch (err) {
+      alert("فشل حذف الملف")
+    }
   }
 
   const isEvidenceChecked = (evidenceId: string) => {
     const visit = activeTool === "الملاحظة الصفية" ? activeVisit : 0
     return responses.has(`${evidenceId}-${visit}`)
-  }
-
-  const getScoreValue = (evidenceId: string) => {
-    const visit = activeTool === "الملاحظة الصفية" ? activeVisit : 0
-    return responses.get(`${evidenceId}-${visit}`)?.scoreValue || 0
   }
 
   const totalEvidence = allEvidence.length
@@ -129,7 +170,9 @@ export function AssessmentEngine({ assessment, domains, initialResponses, userRo
     try {
       await finishAssessment(assessment.id)
       window.location.href = "/quality-assessor"
-    } catch {}
+    } catch (e: any) {
+      alert(e.message)
+    }
   }
 
   return (
@@ -144,17 +187,9 @@ export function AssessmentEngine({ assessment, domains, initialResponses, userRo
               <div className="min-w-0">
                 <h2 className="text-lg font-bold text-foreground-strong truncate">{assessment.school.name}</h2>
                 <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5 mt-1.5 text-[13px] text-muted-foreground">
-                  {assessment.branch && (
-                    <span className="flex items-center gap-1.5">
-                      <Building2 className="w-3.5 h-3.5 shrink-0" /> {assessment.branch.name}
-                    </span>
-                  )}
-                  <span className="flex items-center gap-1.5">
-                    <Hash className="w-3.5 h-3.5 shrink-0" /> {totalEvidence} شاهد
-                  </span>
-                  <Badge variant={isCompleted ? "success" : "warning"} dot>
-                    {isCompleted ? "مكتمل" : "جاري التقييم"}
-                  </Badge>
+                  {assessment.branch && <span className="flex items-center gap-1.5"><Building2 className="w-3.5 h-3.5 shrink-0" /> {assessment.branch.name}</span>}
+                  <span className="flex items-center gap-1.5"><Hash className="w-3.5 h-3.5 shrink-0" /> {totalEvidence} شاهد</span>
+                  <Badge variant={isCompleted ? "success" : "warning"} dot>{isCompleted ? "مكتمل" : "جاري التقييم"}</Badge>
                 </div>
               </div>
             </div>
@@ -165,132 +200,152 @@ export function AssessmentEngine({ assessment, domains, initialResponses, userRo
                     <circle cx="18" cy="18" r="15.5" fill="none" stroke="hsl(var(--surface-muted))" strokeWidth="3" />
                     <circle cx="18" cy="18" r="15.5" fill="none" stroke="hsl(var(--secondary))" strokeWidth="3" strokeLinecap="round" strokeDasharray={`${(progress / 100) * 97.34} 97.34`} className="transition-all duration-500 ease-smooth" />
                   </svg>
-                  <div className="absolute inset-0 flex items-center justify-center">
-                    <span className="text-sm font-bold text-foreground-strong numeric">{progress}%</span>
-                  </div>
+                  <div className="absolute inset-0 flex items-center justify-center"><span className="text-sm font-bold text-foreground-strong numeric">{progress}%</span></div>
                 </div>
-                <div className="text-xs text-muted-foreground">
-                  <p className="font-semibold text-foreground-strong numeric">{verifiedCount} / {totalEvidence}</p>
-                  <p>شاهد متحقق</p>
-                </div>
+                <div className="text-xs text-muted-foreground"><p className="font-semibold text-foreground-strong numeric">{verifiedCount} / {totalEvidence}</p><p>شاهد متحقق</p></div>
               </div>
-              {!isCompleted && (
-                <Button variant="success" size="md" icon={<CheckCircle className="w-4 h-4" />} onClick={() => setIsFinishOpen(true)} disabled={isReadOnly}>
-                  إنهاء التقييم
-                </Button>
-              )}
+              {!isCompleted && <Button variant="success" size="md" icon={<CheckCircle className="w-4 h-4" />} onClick={() => setIsFinishOpen(true)} disabled={isReadOnly}>إنهاء التقييم</Button>}
             </div>
           </div>
         </CardContent>
       </Card>
 
       <div className="lg:hidden flex items-center justify-between p-2.5 bg-surface border border-border rounded-lg sticky top-16 z-20 shadow-sm">
-        <Button variant="outline" size="sm" icon={sidebarOpen ? <X className="w-4 h-4" /> : <Menu className="w-4 h-4" />} onClick={() => setSidebarOpen(!sidebarOpen)}>
-          التنقل
-        </Button>
+        <Button variant="outline" size="sm" icon={<Menu className="w-4 h-4" />}>التنقل</Button>
       </div>
 
       <div className="flex flex-col lg:flex-row gap-6 min-w-0">
         <div className="flex-1 min-w-0 space-y-6">
+          {/* Tool Tabs */}
           <div className="flex flex-wrap gap-2 pb-2 border-b border-border">
             {toolData.map((tool) => {
               const toolVerified = tool.evidence.filter((e: any) => isEvidenceChecked(e.id)).length
               return (
-                <button
-                  key={tool.name}
-                  onClick={() => setActiveTool(tool.name)}
-                  className={cn(
-                    "px-4 py-2 rounded-lg text-sm font-medium whitespace-nowrap transition-smooth flex items-center gap-2",
-                    activeTool === tool.name ? "bg-primary/10 text-primary border border-primary/20" : "text-muted-foreground hover:bg-surface-muted border border-transparent"
-                  )}
-                >
+                <button key={tool.name} onClick={() => setActiveTool(tool.name)} className={cn("px-4 py-2 rounded-lg text-sm font-medium whitespace-nowrap transition-smooth flex items-center gap-2", activeTool === tool.name ? "bg-primary/10 text-primary border border-primary/20" : "text-muted-foreground hover:bg-surface-muted border border-transparent")}>
                   {tool.name}
-                  <span className={cn("text-[10px] px-1.5 py-0.5 rounded-full numeric", activeTool === tool.name ? "bg-primary/20 text-primary" : "bg-surface-muted text-muted-foreground")}>
-                    {toolVerified}/{tool.evidence.length}
-                  </span>
+                  <span className={cn("text-[10px] px-1.5 py-0.5 rounded-full numeric", activeTool === tool.name ? "bg-primary/20 text-primary" : "bg-surface-muted text-muted-foreground")}>{toolVerified}/{tool.evidence.length}</span>
                 </button>
               )
             })}
           </div>
 
+          {/* Active Tool Content */}
           {activeToolData && (
             <>
               <Card className="p-4 flex flex-col md:flex-row items-start md:items-center justify-between gap-4 bg-surface-muted/30">
                 <div className="flex items-center gap-3 min-w-0">
                   <Wrench className="w-5 h-5 text-primary shrink-0" />
-                  <div className="min-w-0">
-                    <h3 className="text-sm font-bold text-foreground-strong truncate">{activeToolData.name}</h3>
-                    <p className="text-xs text-muted-foreground">{activeToolData.evidence.length} شاهد مطلوب</p>
-                  </div>
+                  <div className="min-w-0"><h3 className="text-sm font-bold text-foreground-strong truncate">{activeToolData.name}</h3><p className="text-xs text-muted-foreground">{activeToolData.evidence.length} شاهد مطلوب</p></div>
                 </div>
-                <div className="w-full md:w-48 shrink-0">
-                  <Progress 
-                    value={activeToolData.evidence.length > 0 ? (activeToolData.evidence.filter((e: any) => isEvidenceChecked(e.id)).length / activeToolData.evidence.length) * 100 : 0} 
-                    size="sm" 
-                    tone="default" 
-                  />
-                </div>
+                <div className="w-full md:w-48 shrink-0"><Progress value={activeToolData.evidence.length > 0 ? (activeToolData.evidence.filter((e: any) => isEvidenceChecked(e.id)).length / activeToolData.evidence.length) * 100 : 0} size="sm" tone="default" /></div>
               </Card>
 
               {activeTool === "الملاحظة الصفية" && (
                 <Card className="p-4 flex flex-col md:flex-row gap-4 items-start md:items-center justify-between">
-                  <div className="flex items-center gap-2 shrink-0">
-                    <Calendar className="w-5 h-5 text-primary" />
-                    <h3 className="text-sm font-bold text-foreground-strong">الزيارة الحالية:</h3>
-                  </div>
+                  <div className="flex items-center gap-2 shrink-0"><Calendar className="w-5 h-5 text-primary" /><h3 className="text-sm font-bold text-foreground-strong">الزيارة الحالية:</h3></div>
                   <div className="flex gap-2 flex-wrap">
                     {[1, 2, 3, 4, 5, 6, 7].map(v => (
-                      <button
-                        key={v}
-                        onClick={() => setActiveVisit(v)}
-                        className={cn(
-                          "w-10 h-10 rounded-lg flex items-center justify-center text-sm font-bold transition-smooth",
-                          activeVisit === v ? "bg-primary text-white" : "bg-surface-muted text-foreground hover:bg-primary/10"
-                        )}
-                      >
-                        {v}
-                      </button>
+                      <button key={v} onClick={() => setActiveVisit(v)} className={cn("w-10 h-10 rounded-lg flex items-center justify-center text-sm font-bold transition-smooth", activeVisit === v ? "bg-primary text-white" : "bg-surface-muted text-foreground hover:bg-primary/10")}>{v}</button>
                     ))}
                   </div>
                 </Card>
               )}
 
+              {/* Evidence List */}
               <div className="space-y-3 min-w-0">
-                {activeToolData.grouped.length === 0 ? (
-                  <Card className="p-12 text-center">
-                    <ClipboardCheck className="w-12 h-12 text-muted-foreground mx-auto mb-4" />
-                    <h3 className="text-base font-semibold text-foreground-strong">لا توجد شواهد لهذه الأداة</h3>
-                  </Card>
-                ) : (
-                  activeToolData.grouped.map((group: any) => (
-                    <div key={group.indicator.id} className="space-y-3 min-w-0">
-                      <div className="px-4 py-2 bg-primary/5 rounded-lg border border-primary/10 min-w-0">
-                        <div className="flex items-start gap-3">
-                          <Badge variant="neutral" className="font-mono numeric shrink-0 text-[11px] mt-0.5">{group.indicator.code}</Badge>
-                          <p className="text-[14px] text-foreground-strong leading-relaxed font-medium flex-1 min-w-0">{group.indicator.description}</p>
-                        </div>
+                {activeToolData.grouped.map((group: any) => (
+                  <div key={group.indicator.id} className="space-y-3 min-w-0">
+                    <div className="px-4 py-2 bg-primary/5 rounded-lg border border-primary/10 min-w-0">
+                      <div className="flex items-start gap-3">
+                        <Badge variant="neutral" className="font-mono numeric shrink-0 text-[11px] mt-0.5">{group.indicator.code}</Badge>
+                        <p className="text-[14px] text-foreground-strong leading-relaxed font-medium flex-1 min-w-0">{group.indicator.description}</p>
                       </div>
-
-                      {Object.values(group.paragraphs).map((para: any) => (
-                        <ParagraphAccordion
-                          key={`${group.indicator.id}-${para.no}`}
-                          para={para}
-                          isChecked={isEvidenceChecked}
-                          getScore={getScoreValue}
-                          onToggle={handleEvidenceChange}
-                          onDetails={setDetailsEvidence}
-                          isReadOnly={isReadOnly}
-                          savingId={savingId}
-                        />
-                      ))}
                     </div>
-                  ))
-                )}
+                    
+                    {group.paragraphs.map((para: any) => {
+                      const paraKey = `${group.indicator.id}-${para.no}`
+                      const isCollapsed = collapsedParagraphs.has(paraKey)
+                      const verifiedInPara = para.items.filter((e:any) => isEvidenceChecked(e.id)).length
+
+                      return (
+                        <Card key={paraKey} className="overflow-hidden">
+                          {/* Email Header - Clickable to Toggle */}
+                          <div
+                            role="button"
+                            tabIndex={0}
+                            aria-expanded={!isCollapsed}
+                            onClick={() => toggleParagraph(group.indicator.id, para.no)}
+                            onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggleParagraph(group.indicator.id, para.no) } }}
+                            className="p-4 border-b border-border flex items-center justify-between cursor-pointer hover:bg-surface-muted/50 transition-smooth min-w-0"
+                          >
+                            <div className="flex items-center gap-3 min-w-0">
+                              <Badge variant="info" className="shrink-0 whitespace-nowrap">الفقرة {para.no}</Badge>
+                              <p className="text-sm font-medium text-foreground-strong min-w-0 break-words">{para.title}</p>
+                            </div>
+                            
+                            <div className="flex items-center gap-3 shrink-0 mr-2">
+                              {/* Counter: nowrap and shrink-0 prevents breaking */}
+                              <div className="text-xs text-muted-foreground numeric whitespace-nowrap">
+                                {verifiedInPara} / {para.items.length}
+                              </div>
+                              <ChevronDown className={cn("w-4 h-4 text-muted-foreground transition-transform shrink-0", isCollapsed ? "" : "rotate-180")} />
+                            </div>
+                          </div>
+
+                          {/* Collapsible Content */}
+                          {!isCollapsed && (
+                            <div className="divide-y divide-border/70">
+                              {para.items.map((ev: any) => {
+                                const checked = isEvidenceChecked(ev.id)
+                                const evAttachments = attachments.filter(a => a.evidenceId === ev.id)
+                                return (
+                                  <div key={ev.id} className={cn("p-4 transition-smooth", checked ? "bg-success/5" : "hover:bg-surface-muted/50")}>
+                                    <div className="flex items-start justify-between gap-4 mb-3">
+                                      <p className="text-sm text-foreground-strong flex-1">{ev.text}</p>
+                                      <button 
+                                        type="button" 
+                                        onClick={(e) => { e.stopPropagation(); handleEvidenceChange(ev.id, !checked) }} 
+                                        disabled={isReadOnly} 
+                                        className={cn(
+                                          "w-6 h-6 rounded flex items-center justify-center transition-smooth border-2 shrink-0", 
+                                          checked ? "bg-success border-success text-white" : "border-border bg-surface hover:border-primary", 
+                                          isReadOnly ? "opacity-50 cursor-not-allowed" : "cursor-pointer"
+                                        )}
+                                      >
+                                        {checked && <CheckCircle className="w-4 h-4" />}
+                                      </button>
+                                    </div>
+                                    <div className="flex flex-wrap items-center gap-2" onClick={(e) => e.stopPropagation()}>
+                                      <label className={cn("cursor-pointer", isReadOnly && "pointer-events-none opacity-50")}>
+                                        <span className="inline-flex items-center gap-1 text-xs text-cyan-600 hover:underline">
+                                          <Upload className="w-3 h-3" /> إرفاق شاهد
+                                        </span>
+                                        <input type="file" className="hidden" onChange={(e) => e.target.files?.[0] && handleFileUpload(ev.id, e.target.files[0])} accept=".pdf,.doc,.docx,.jpg,.jpeg,.png,.svg" disabled={isReadOnly} />
+                                      </label>
+                                      {evAttachments.map(att => (
+                                        <div key={att.id} className="flex items-center gap-1 text-xs bg-slate-100 px-2 py-1 rounded">
+                                          <FileText className="w-3 h-3" />
+                                          <a href={att.fileData} download={att.fileName} className="hover:underline truncate max-w-[100px]">{att.fileName}</a>
+                                          {!isReadOnly && <button onClick={() => handleDeleteAttachment(att.id)} className="text-red-500 hover:text-red-700"><Trash2 className="w-3 h-3" /></button>}
+                                        </div>
+                                      ))}
+                                    </div>
+                                  </div>
+                                )
+                              })}
+                            </div>
+                          )}
+                        </Card>
+                      )
+                    })}
+                  </div>
+                ))}
               </div>
             </>
           )}
         </div>
 
+        {/* Sidebar Overview (Desktop) */}
         <aside className="hidden lg:block w-72 flex-shrink-0">
           <div className="sticky top-20 space-y-4">
             <Card className="p-4">
@@ -301,21 +356,12 @@ export function AssessmentEngine({ assessment, domains, initialResponses, userRo
                   const total = tool.evidence.length
                   const pct = total > 0 ? Math.round((verified / total) * 100) : 0
                   return (
-                    <button
-                      key={tool.name}
-                      onClick={() => setActiveTool(tool.name)}
-                      className={cn(
-                        "w-full text-right p-2 rounded-lg transition-smooth",
-                        activeTool === tool.name ? "bg-primary/10" : "hover:bg-surface-muted"
-                      )}
-                    >
+                    <button key={tool.name} onClick={() => setActiveTool(tool.name)} className={cn("w-full text-right p-2 rounded-lg transition-smooth", activeTool === tool.name ? "bg-primary/10" : "hover:bg-surface-muted")}>
                       <div className="flex items-center justify-between mb-1">
-                        <span className={cn("text-xs font-medium", activeTool === tool.name ? "text-primary" : "text-foreground-strong")}>
-                          {tool.name}
-                        </span>
+                        <span className={cn("text-xs font-medium", activeTool === tool.name ? "text-primary" : "text-foreground-strong")}>{tool.name}</span>
                         <span className="text-[11px] text-muted-foreground numeric">{verified}/{total}</span>
                       </div>
-                      <Progress value={pct} size="sm" className="h-1" tone={activeTool === tool.name ? "default" : "default"} />
+                      <Progress value={pct} size="sm" className="h-1" tone="default" />
                     </button>
                   )
                 })}
@@ -325,49 +371,11 @@ export function AssessmentEngine({ assessment, domains, initialResponses, userRo
         </aside>
       </div>
 
-      <Modal 
-        isOpen={!!detailsEvidence} 
-        onClose={() => setDetailsEvidence(null)} 
-        title="تفاصيل الشاهد" 
-        description={detailsEvidence?.indicatorCode}
-      >
-        {detailsEvidence && (
-          <div className="space-y-4">
-            <div className="p-4 bg-surface-muted rounded-lg">
-              <p className="text-sm text-foreground-strong font-medium">{detailsEvidence.text}</p>
-            </div>
-            <div className="grid grid-cols-2 gap-4 text-sm">
-              <div>
-                <p className="text-xs text-muted-foreground mb-1">الأداة</p>
-                <p className="font-medium text-foreground-strong">{detailsEvidence.tool}</p>
-              </div>
-              <div>
-                <p className="text-xs text-muted-foreground mb-1">الفقرة</p>
-                <p className="font-medium text-foreground-strong numeric">{detailsEvidence.paragraphNo}</p>
-              </div>
-              <div className="col-span-2">
-                <p className="text-xs text-muted-foreground mb-1">نص الفقرة</p>
-                <p className="font-medium text-foreground-strong">{detailsEvidence.paragraphText}</p>
-              </div>
-            </div>
-            <div className="flex justify-end pt-2">
-              <Button variant="outline" onClick={() => setDetailsEvidence(null)}>إغلاق</Button>
-            </div>
-          </div>
-        )}
-      </Modal>
-
       <Modal isOpen={isFinishOpen} onClose={() => setIsFinishOpen(false)} title="تأكيد إنهاء التقييم" description="لن تتمكن من تعديل الإجابات بعد الإنهاء.">
         <div className="space-y-4">
           <div className="grid grid-cols-2 gap-3">
-            <div className="p-4 bg-success/5 border border-success/20 rounded-lg text-center">
-              <p className="text-xs text-muted-foreground">الشواهد المتحققة</p>
-              <p className="text-2xl font-bold text-success numeric mt-1">{verifiedCount}</p>
-            </div>
-            <div className="p-4 bg-danger/5 border border-danger/20 rounded-lg text-center">
-              <p className="text-xs text-muted-foreground">الشواهد المتبقية</p>
-              <p className="text-2xl font-bold text-danger numeric mt-1">{totalEvidence - verifiedCount}</p>
-            </div>
+            <div className="p-4 bg-success/5 border border-success/20 rounded-lg text-center"><p className="text-xs text-muted-foreground">الشواهد المتحققة</p><p className="text-2xl font-bold text-success numeric mt-1">{verifiedCount}</p></div>
+            <div className="p-4 bg-danger/5 border border-danger/20 rounded-lg text-center"><p className="text-xs text-muted-foreground">الشواهد المتبقية</p><p className="text-2xl font-bold text-danger numeric mt-1">{totalEvidence - verifiedCount}</p></div>
           </div>
           <div className="flex justify-end gap-3 pt-2">
             <Button variant="outline" onClick={() => setIsFinishOpen(false)}>إلغاء</Button>
@@ -376,109 +384,5 @@ export function AssessmentEngine({ assessment, domains, initialResponses, userRo
         </div>
       </Modal>
     </div>
-  )
-}
-
-function ParagraphAccordion({ para, isChecked, getScore, onToggle, onDetails, isReadOnly, savingId }: any) {
-  const [isOpen, setIsOpen] = useState(false)
-  const verifiedCount = para.items.filter((e: any) => isChecked(e.id)).length
-  const totalCount = para.items.length
-  const progress = totalCount > 0 ? Math.round((verifiedCount / totalCount) * 100) : 0
-
-  return (
-    <Card className="overflow-hidden">
-      <button 
-        onClick={() => setIsOpen(!isOpen)}
-        className="w-full p-4 flex items-center justify-between gap-4 hover:bg-surface-muted/50 transition-smooth"
-      >
-        <div className="flex items-center gap-3 flex-1 min-w-0">
-          <Badge variant="info" className="shrink-0">الفقرة {para.no}</Badge>
-          <p className="text-sm font-medium text-foreground-strong truncate">{para.title}</p>
-        </div>
-        <div className="flex items-center gap-4 shrink-0">
-          <div className="text-xs text-muted-foreground numeric">
-            {verifiedCount} / {totalCount}
-          </div>
-          <div className="w-20 hidden sm:block">
-            <Progress value={progress} size="sm" className="h-1.5" tone={progress === 100 ? "success" : "default"} />
-          </div>
-          <ChevronDown className={cn("w-4 h-4 text-muted-foreground transition-transform", isOpen && "rotate-180")} />
-        </div>
-      </button>
-
-      {isOpen && (
-        <div className="border-t border-border bg-surface-muted/20">
-          <div className="w-full overflow-hidden">
-            <table className="w-full table-fixed text-sm text-right">
-              <colgroup>
-                <col className="w-12" />
-                <col />
-                <col className="w-24" />
-                <col className="w-20" />
-              </colgroup>
-              <thead className="text-[11px] text-muted-foreground uppercase">
-                <tr className="border-b border-border">
-                  <th className="px-4 py-2 font-medium">م</th>
-                  <th className="px-4 py-2 font-medium">نص الشاهد</th>
-                  <th className="px-4 py-2 font-medium">الحالة</th>
-                  <th className="px-4 py-2 font-medium"></th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-border/70">
-                {para.items.map((ev: any, idx: number) => {
-                  const checked = isChecked(ev.id)
-                  const isSpecial = ev.indicatorCode === '2-1-1-3' && ev.paragraphNo === 4
-                  const score = getScore(ev.id)
-                  
-                  return (
-                    <tr key={ev.id} className={cn("transition-smooth", checked ? "bg-success/5" : "hover:bg-surface-muted/50")}>
-                      <td className="px-4 py-3 text-muted-foreground numeric align-top">{idx + 1}</td>
-                      <td className="px-4 py-3 text-foreground-strong break-words whitespace-normal">{ev.text}</td>
-                      <td className="px-4 py-3 align-top">
-                        {isSpecial ? (
-                          <select
-                            value={score}
-                            onChange={(e) => onToggle(ev.id, Number(e.target.value) > 0, Number(e.target.value))}
-                            disabled={isReadOnly}
-                            className="h-8 px-2 rounded-md border border-border bg-surface text-xs focus:outline-none focus:ring-2 focus:ring-secondary/30 w-full"
-                          >
-                            <option value="0">اختر</option>
-                            <option value="1">1</option>
-                            <option value="2">2</option>
-                            <option value="3">3</option>
-                            <option value="4">4</option>
-                          </select>
-                        ) : (
-                          <button
-                            onClick={() => onToggle(ev.id, !checked)}
-                            disabled={isReadOnly}
-                            className={cn(
-                              "w-6 h-6 rounded flex items-center justify-center transition-smooth border-2",
-                              checked ? "bg-success border-success text-white" : "border-border bg-surface",
-                              isReadOnly && "opacity-50 cursor-not-allowed"
-                            )}
-                          >
-                            {checked && <CheckCircle className="w-4 h-4" />}
-                          </button>
-                        )}
-                      </td>
-                      <td className="px-4 py-3 text-left align-top">
-                        <button 
-                          onClick={() => onDetails(ev)}
-                          className="text-xs text-secondary hover:underline font-medium"
-                        >
-                          تفاصيل
-                        </button>
-                        {savingId === ev.id && <Loader2 className="w-3 h-3 animate-spin text-muted-foreground inline-block mr-2" />}
-                      </td>
-                    </tr>
-                  )
-                })}
-              </tbody>
-            </table>
-          </div>
-        </div>
-      )}
-    </Card>
   )
 }

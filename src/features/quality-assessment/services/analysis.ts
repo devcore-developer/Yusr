@@ -46,16 +46,17 @@ interface ResponseWithEvidence {
 }
 
 // دالة تطبيق قواعد الجودة الرسمية
-export function getPerformanceBand(percentage: number): PerformanceBand {
-  if (percentage === 0) return 'غير مقيم'
+// تم تعديلها لتقبل null كقيمة تعني "غير مقيم"
+export function getPerformanceBand(percentage: number | null): PerformanceBand {
+  if (percentage === null) return 'غير مقيم'
   if (percentage < 50) return 'التهيئة'
   if (percentage < 75) return 'الانطلاق'
   if (percentage < 90) return 'التقدم'
   return 'التميز'
 }
 
-export function getPerformanceLevel(percentage: number): PerformanceLevel {
-  if (percentage === 0) return 0
+export function getPerformanceLevel(percentage: number | null): PerformanceLevel {
+  if (percentage === null) return 0
   if (percentage < 50) return 1
   if (percentage < 75) return 2
   if (percentage < 90) return 3
@@ -116,6 +117,10 @@ export function analyzeAssessment(
     }
 
     const dCompletion = dTotal > 0 ? Math.round((dCompleted / dTotal) * 100) : 0
+    
+    // إذا لم يتم الإجابة على أي مؤشر في هذا المجال، اعتبره "غير مقيم" (null)
+    const dBandPercentage = dCompleted > 0 ? dCompletion : null
+
     domainAnalysis.push({
       domainId: domain.id,
       domainName: domain.name,
@@ -125,11 +130,14 @@ export function analyzeAssessment(
       notPresent: dNotPresent,
       notApplicable: dNotApplicable,
       completionPercentage: dCompletion,
-      performanceBand: getPerformanceBand(dCompletion)
+      performanceBand: getPerformanceBand(dBandPercentage)
     })
   }
 
   const completionPercentage = totalIndicators > 0 ? Math.round((completedResponses / totalIndicators) * 100) : 0
+  
+  // النسبة العامة للتقييم: إذا لم تتم الإجابة على أي مؤشر، اعتبر التقييم "غير مقيم"
+  const overallBandPercentage = completedResponses > 0 ? completionPercentage : null
 
   return {
     totalIndicators,
@@ -139,8 +147,8 @@ export function analyzeAssessment(
     notApplicableCount,
     completionPercentage,
     evidenceCoverage: completedResponses > 0 ? Math.round((indicatorsWithEvidence / completedResponses) * 100) : 0,
-    performanceLevel: getPerformanceLevel(completionPercentage),
-    performanceBand: getPerformanceBand(completionPercentage),
+    performanceLevel: getPerformanceLevel(overallBandPercentage),
+    performanceBand: getPerformanceBand(overallBandPercentage),
     domainAnalysis,
     potentialGaps
   }

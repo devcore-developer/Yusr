@@ -9,23 +9,35 @@ export default async function InitiativePage() {
   const user = await getCurrentUser()
   if (!user) redirect("/login")
 
-  // جلب خطط التحسين المتاحة للمدرسة لربطها بالمبادرة
+  if (!["SUPER_ADMIN", "QUALITY_ASSESSOR"].includes(user.role)) {
+    redirect("/dashboard")
+  }
+
   const plans = await prisma.improvementPlan.findMany({
     where: { schoolId: user.schoolId || undefined },
     select: { id: true, title: true }
   })
 
+  const isAssessor = user.role === "QUALITY_ASSESSOR"
+
   return (
     <div className="space-y-6">
       <PageHeader
         title="إنشاء مبادرة"
-        description="نموذج مبادرة إلكتروني قابل للحفظ والطباعة بصيغة PDF أو Word."
+        description="نموذج مبادرة إلكتروني قابل للحفظ والطباعة."
         breadcrumbs={[{ label: 'الرئيسية', href: '/' }, { label: 'إنشاء مبادرة' }]}
       />
       
       <Card>
         <CardContent className="p-6">
-          <InitiativeForm plans={plans} />
+          {isAssessor ? (
+            <InitiativeForm plans={plans} />
+          ) : (
+            <div className="text-center py-12 text-muted-foreground">
+              <p className="font-medium text-foreground-strong mb-1">صلاحية للقراءة فقط</p>
+              <p className="text-sm">يسمح لمقيمي الجودة فقط بإنشاء المبادرات.</p>
+            </div>
+          )}
         </CardContent>
       </Card>
     </div>

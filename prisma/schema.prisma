@@ -63,6 +63,7 @@ model User {
   branchId      String?
   createdAt     DateTime   @default(now())
   updatedAt     DateTime   @updatedAt
+  uploadedAttachments AssessmentAttachment[] @relation("UploadedAttachments")
 
   school        School?    @relation(fields: [schoolId], references: [id])
   branch        Branch?    @relation("BranchUsers", fields: [branchId], references: [id])
@@ -235,6 +236,7 @@ model Assessment {
   assessor      User             @relation(fields: [assessorId], references: [id])
   responses     AssessmentResponse[]
   evidenceResponses EvidenceResponse[]
+  attachments   AssessmentAttachment[]
   gaps          Gap[]
   evidence      Evidence[]
   plans         ImprovementPlan[]
@@ -472,4 +474,22 @@ model Initiative {
   createdById   String
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt
+}
+
+model AssessmentAttachment {
+  id            String   @id @default(cuid())
+  assessmentId  String
+  evidenceId    String
+  uploadedById  String
+  fileName      String
+  fileType      String
+  fileSize      Int
+  fileData      String   // Base64 encoded string for immediate Vercel compatibility
+  createdAt     DateTime @default(now())
+
+  assessment    Assessment @relation(fields: [assessmentId], references: [id], onDelete: Cascade)
+  uploader      User       @relation("UploadedAttachments", fields: [uploadedById], references: [id])
+  
+  @@index([assessmentId])
+  @@index([evidenceId])
 }

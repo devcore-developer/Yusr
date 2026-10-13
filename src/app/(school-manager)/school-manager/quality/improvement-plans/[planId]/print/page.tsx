@@ -13,9 +13,8 @@ export default async function PrintPlanPage({ params }: { params: { planId: stri
       actions: true, 
       school: true, 
       branch: true, 
-      indicator: true, 
       gap: { include: { indicator: true } } 
-    } as any // تجاوز خطأ TypeScript المؤقت للعلاقات
+    } as any
   })
 
   if (!plan) redirect("/")

@@ -1,5 +1,38 @@
 import { prisma } from "@/lib/prisma"
 
+export interface AssessmentScore {
+  id: string
+  status: string
+  score: number
+  evaluatorId: string
+  evaluatorName: string
+  evaluatorRole: string
+  verifiedCount: number
+  totalEvidence: number
+  branchId?: string | null
+  branchName?: string
+}
+
+export interface EvaluatorAnalytics {
+  id: string
+  name: string
+  role: string
+  assessments: AssessmentScore[]
+  provisionalAverage: number | null
+  finalAverage: number | null
+}
+
+export interface BranchAnalytics {
+  provisionalPercentage: number | null
+  finalPercentage: number | null
+  eligibleAssessments: number
+  completedAssessments: number
+  inProgressAssessments: number
+  excludedAssessments: number
+  evaluators: EvaluatorAnalytics[]
+  assessments: AssessmentScore[]
+}
+
 export async function getPlatformAnalytics() {
   const [schools, branches, assessments, gaps, totalEvidence, verifiedEvidence] = await Promise.all([
     prisma.school.count(),
@@ -26,52 +59,175 @@ export async function getPlatformAnalytics() {
   }
 }
 
-export async function getSchoolAnalytics(schoolId: string) {
-  const [branches, assessments, gaps, totalEvidence, verifiedEvidence] = await Promise.all([
-    prisma.branch.findMany({ where: { schoolId }, include: { _count: { select: { users: true } } } }),
-    prisma.assessment.findMany({ where: { schoolId }, include: { branch: true, assessor: true, _count: { select: { gaps: true } } }, orderBy: { startedAt: "desc" } }),
-    prisma.gap.findMany({ where: { schoolId }, include: { indicator: true, branch: true } }),
-    prisma.fixedEvidence.count(),
-    prisma.evidenceResponse.count({ where: { isVerified: true, assessment: { schoolId } } })
-  ])
-
-  const responseCoverage = totalEvidence > 0 ? Math.round((verifiedEvidence / totalEvidence) * 100) : 0
-
-  const branchComparison = await Promise.all(branches.map(async (b) => {
-    const branchAssessments = assessments.filter(a => a.branchId === b.id)
-    const completed = branchAssessments.filter(a => a.status === "COMPLETED").length
-    const branchEvidence = await prisma.evidenceResponse.count({ where: { isVerified: true, assessment: { branchId: b.id } } })
-    
-    return {
-      id: b.id,
-      name: b.name,
-      assessments: branchAssessments.length,
-      completed,
-      coverage: branchAssessments.length > 0 ? Math.round((branchEvidence / (branchAssessments.length * 50)) * 100) : 0
+export async function getSchoolAnalytics(schoolId: string): Promise<BranchAnalytics> {
+  const totalEvidence = await prisma.fixedEvidence.count()
+  const assessments = await prisma.assessment.findMany({
+    where: { schoolId, type: "NORMAL", status: { in: ["IN_PROGRESS", "COMPLETED"] } },
+    include: {
+      assessor: { select: { id: true, name: true, role: true } },
+      branch: { select: { id: true, name: true } },
+      evidenceResponses: { where: { isVerified: true } }
     }
+  })
+
+  const excludedAssessments = await prisma.assessment.count({
+    where: { schoolId, OR: [ { type: "PRIVATE_REVIEW" }, { status: "NOT_STARTED" } ] }
+  })
+
+  if (assessments.length === 0) {
+    return {
+      provisionalPercentage: null,
+      finalPercentage: null,
+      eligibleAssessments: 0,
+      completedAssessments: 0,
+      inProgressAssessments: 0,
+      excludedAssessments,
+      evaluators: [],
+      assessments: []
+    }
+  }
+
+  const mapped: AssessmentScore[] = assessments.map(a => ({
+    id: a.id,
+    status: a.status,
+    score: totalEvidence > 0 ? Math.round((a.evidenceResponses.length / totalEvidence) * 100) : 0,
+    evaluatorId: a.assessor.id,
+    evaluatorName: a.assessor.name,
+    evaluatorRole: a.assessor.role,
+    verifiedCount: a.evidenceResponses.length,
+    totalEvidence,
+    branchId: a.branchId,
+    branchName: a.branch?.name || "كامل المدرسة"
   }))
 
-  const history = assessments.filter(a => a.status === "COMPLETED").map(a => ({
-    id: a.id,
-    date: a.completedAt || a.startedAt,
-    progress: a.progress,
-    gaps: a._count.gaps,
-    responses: 0
-  }))
+  const provisionalPercentage = mapped.length > 0
+    ? Math.round((mapped.reduce((sum, a) => sum + a.score, 0) / mapped.length) * 10) / 10
+    : null
+
+  const completed = mapped.filter(a => a.status === "COMPLETED")
+  const finalPercentage = completed.length > 0
+    ? Math.round((completed.reduce((sum, a) => sum + a.score, 0) / completed.length) * 10) / 10
+    : null
+
+  const evaluatorMap = new Map<string, EvaluatorAnalytics>()
+  for (const a of mapped) {
+    if (!evaluatorMap.has(a.evaluatorId)) {
+      evaluatorMap.set(a.evaluatorId, {
+        id: a.evaluatorId,
+        name: a.evaluatorName,
+        role: a.evaluatorRole,
+        assessments: [],
+        provisionalAverage: 0,
+        finalAverage: null
+      })
+    }
+    evaluatorMap.get(a.evaluatorId)!.assessments.push(a)
+  }
+
+  const evaluators: EvaluatorAnalytics[] = Array.from(evaluatorMap.values()).map(ev => {
+    const evCompleted = ev.assessments.filter(a => a.status === "COMPLETED")
+    ev.provisionalAverage = ev.assessments.length > 0
+      ? Math.round((ev.assessments.reduce((sum, a) => sum + a.score, 0) / ev.assessments.length) * 10) / 10
+      : null
+    ev.finalAverage = evCompleted.length > 0
+      ? Math.round((evCompleted.reduce((sum, a) => sum + a.score, 0) / evCompleted.length) * 10) / 10
+      : null
+    return ev
+  })
 
   return {
-    branches: branches.length,
-    totalAssessments: assessments.length,
-    activeAssessments: assessments.filter(a => a.status === "IN_PROGRESS").length,
-    completedAssessments: assessments.filter(a => a.status === "COMPLETED").length,
-    recentAssessments: assessments.slice(0, 5),
-    totalGaps: gaps.length,
-    openGaps: gaps.filter(g => g.status === "OPEN").length,
-    presentCount: verifiedEvidence,
-    notPresentCount: gaps.length,
-    notApplicableCount: 0,
-    responseCoverage,
-    branchComparison,
-    history
+    provisionalPercentage,
+    finalPercentage,
+    eligibleAssessments: mapped.length,
+    completedAssessments: completed.length,
+    inProgressAssessments: mapped.length - completed.length,
+    excludedAssessments,
+    evaluators,
+    assessments: mapped
+  }
+}
+
+export async function getBranchAnalytics(branchId: string): Promise<BranchAnalytics> {
+  const totalEvidence = await prisma.fixedEvidence.count()
+  const assessments = await prisma.assessment.findMany({
+    where: { branchId, type: "NORMAL", status: { in: ["IN_PROGRESS", "COMPLETED"] } },
+    include: {
+      assessor: { select: { id: true, name: true, role: true } },
+      evidenceResponses: { where: { isVerified: true } }
+    }
+  })
+
+  const excludedAssessments = await prisma.assessment.count({
+    where: { branchId, OR: [ { type: "PRIVATE_REVIEW" }, { status: "NOT_STARTED" } ] }
+  })
+
+  if (assessments.length === 0) {
+    return {
+      provisionalPercentage: null,
+      finalPercentage: null,
+      eligibleAssessments: 0,
+      completedAssessments: 0,
+      inProgressAssessments: 0,
+      excludedAssessments,
+      evaluators: [],
+      assessments: []
+    }
+  }
+
+  const mapped: AssessmentScore[] = assessments.map(a => ({
+    id: a.id,
+    status: a.status,
+    score: totalEvidence > 0 ? Math.round((a.evidenceResponses.length / totalEvidence) * 100) : 0,
+    evaluatorId: a.assessor.id,
+    evaluatorName: a.assessor.name,
+    evaluatorRole: a.assessor.role,
+    verifiedCount: a.evidenceResponses.length,
+    totalEvidence
+  }))
+
+  const provisionalPercentage = mapped.length > 0
+    ? Math.round((mapped.reduce((sum, a) => sum + a.score, 0) / mapped.length) * 10) / 10
+    : null
+
+  const completed = mapped.filter(a => a.status === "COMPLETED")
+  const finalPercentage = completed.length > 0
+    ? Math.round((completed.reduce((sum, a) => sum + a.score, 0) / completed.length) * 10) / 10
+    : null
+
+  const evaluatorMap = new Map<string, EvaluatorAnalytics>()
+  for (const a of mapped) {
+    if (!evaluatorMap.has(a.evaluatorId)) {
+      evaluatorMap.set(a.evaluatorId, {
+        id: a.evaluatorId,
+        name: a.evaluatorName,
+        role: a.evaluatorRole,
+        assessments: [],
+        provisionalAverage: 0,
+        finalAverage: null
+      })
+    }
+    evaluatorMap.get(a.evaluatorId)!.assessments.push(a)
+  }
+
+  const evaluators: EvaluatorAnalytics[] = Array.from(evaluatorMap.values()).map(ev => {
+    const evCompleted = ev.assessments.filter(a => a.status === "COMPLETED")
+    ev.provisionalAverage = ev.assessments.length > 0
+      ? Math.round((ev.assessments.reduce((sum, a) => sum + a.score, 0) / ev.assessments.length) * 10) / 10
+      : null
+    ev.finalAverage = evCompleted.length > 0
+      ? Math.round((evCompleted.reduce((sum, a) => sum + a.score, 0) / evCompleted.length) * 10) / 10
+      : null
+    return ev
+  })
+
+  return {
+    provisionalPercentage,
+    finalPercentage,
+    eligibleAssessments: mapped.length,
+    completedAssessments: completed.length,
+    inProgressAssessments: mapped.length - completed.length,
+    excludedAssessments,
+    evaluators,
+    assessments: mapped
   }
 }

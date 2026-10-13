@@ -29,10 +29,9 @@ export default async function Home() {
     prisma.school.findMany({ include: { _count: { select: { branches: true } }, assessments: { where: { type: { not: "PRIVATE_REVIEW" } } } } }),
     prisma.domain.findMany({ include: { indicators: { include: { fixedEvidence: true } } } }),
     prisma.evidenceResponse.findMany({
-      where: { isVerified: true, assessment: { type: { not: "PRIVATE_REVIEW" } } },
+      where: { isVerified: true, assessment: { type: { not: "PRIVATE_REVIEW" }, status: "COMPLETED" } },
       include: { evidence: { include: { indicator: { include: { domain: true } } } } }
     }),
-    // جلب أبرز الفجوات المفتوحة
     prisma.gap.findMany({
       where: { status: "OPEN", assessment: { type: { not: "PRIVATE_REVIEW" } } },
       take: 5,
@@ -41,14 +40,12 @@ export default async function Home() {
     })
   ])
 
-  // 1. Domain Performance Calculation
   const domainPerformance = domains.map(d => {
     const req = d.indicators.reduce((acc, i) => acc + i.fixedEvidence.length, 0)
     const ver = verifiedEvidence.filter(v => v.evidence.indicator.domain.id === d.id).length
     return { name: d.name, percentage: req > 0 ? Math.round((ver / req) * 100) : null }
   })
 
-  // 2. Indicator Distribution Calculation
   const distributionData = [
     { label: 'التميز', value: 0, color: '#16A34A' },
     { label: 'التقدم', value: 0, color: '#2878B8' },
@@ -65,7 +62,6 @@ export default async function Home() {
     if (distItem) distItem.value++
   }))
 
-  // 3. School Comparison (Top 5)
   const schoolComparison = schools.map(s => {
     const progress = s.assessments.length > 0 ? Math.round(s.assessments.reduce((acc, a) => acc + a.progress, 0) / s.assessments.length) : 0
     return { name: s.name, percentage: progress > 0 ? progress : null }
@@ -89,7 +85,6 @@ export default async function Home() {
         actions={<Button variant="outline" size="md" icon={<RefreshCw className="w-4 h-4" />}>تحديث</Button>}
       />
 
-      {/* KPI Grid */}
       <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
         {kpis.map((kpi, i) => (
           <Card key={i} className="p-4">
@@ -102,7 +97,6 @@ export default async function Home() {
         ))}
       </div>
 
-      {/* Analytics Row 1 */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         <Card className="lg:col-span-2 p-6">
           <CardHeader className="px-0 pt-0">
@@ -122,7 +116,6 @@ export default async function Home() {
         </Card>
       </div>
 
-      {/* Analytics Row 2 & Top Gaps */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         <Card className="lg:col-span-2 p-6">
           <CardHeader className="px-0 pt-0">
@@ -133,7 +126,6 @@ export default async function Home() {
           </CardContent>
         </Card>
         
-        {/* Top Gaps Card */}
         <Card className="p-6 flex flex-col">
           <CardHeader className="px-0 pt-0 flex-row items-center justify-between">
             <CardTitle>أبرز الفجوات</CardTitle>
@@ -164,7 +156,6 @@ export default async function Home() {
         </Card>
       </div>
       
-      {/* Legend */}
       <Card className="p-4">
         <PerformanceLegend />
       </Card>

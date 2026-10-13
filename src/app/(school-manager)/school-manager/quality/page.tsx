@@ -1,138 +1,113 @@
+import { prisma } from "@/lib/prisma"
 import { getCurrentUser } from "@/lib/permissions"
-import { getSchoolAnalytics } from "@/features/quality-reports/services/analytics"
+import { redirect } from "next/navigation"
 import { PageHeader } from "@/components/layout/PageHeader"
-import { Card, CardHeader, CardTitle, CardContent, CardDescription } from "@/components/ui/Card"
-import { Badge, StatusBadge } from "@/components/ui/Badge"
-import { Progress } from "@/components/ui/Progress"
+import { Card, CardContent } from "@/components/ui/Card"
+import { Badge } from "@/components/ui/Badge"
 import { StatCard } from "@/components/dashboard/StatCard"
-import { EmptyState } from "@/components/ui/EmptyState"
+import { Progress } from "@/components/ui/Progress"
 import { CheckCircle, AlertTriangle, ClipboardCheck, TrendingUp } from "lucide-react"
-import Link from "next/link"
-import { formatDate } from "@/lib/utils"
+import { getSchoolAnalytics } from "@/features/quality-reports/services/analytics"
+import { getPerformanceBand } from "@/features/quality-assessment/services/analysis"
 
 export default async function SchoolQualityPage() {
   const user = await getCurrentUser()
-  if (!user?.schoolId) return null
+  if (!user || !user.schoolId) redirect("/login")
 
-  const data = await getSchoolAnalytics(user.schoolId)
+  const schoolId = user.schoolId
+  const perf = await getSchoolAnalytics(schoolId)
+
+  const recentAssessments = await prisma.assessment.findMany({
+    where: { schoolId, type: "NORMAL", status: { in: ["IN_PROGRESS", "COMPLETED"] } },
+    take: 5,
+    orderBy: { startedAt: "desc" },
+    include: { assessor: { select: { name: true } }, branch: { select: { name: true } } }
+  })
 
   return (
-    <div className="space-y-6 lg:space-y-8">
+    <div className="space-y-6">
       <PageHeader
-        title="نظرة عامة على الجودة"
-        description="تحليلات أداء المدرسة وفروعها"
-        breadcrumbs={[{ label: "الرئيسية", href: "/school-manager" }, { label: "الجودة" }]}
+        title="لوحة الجودة المدرسية"
+        description="نظرة عامة على أداء المدرسة والتقييمات."
+        breadcrumbs={[{ label: 'الرئيسية', href: '/school-manager' }, { label: 'الجودة' }]}
       />
 
-      {/* KPIs */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 lg:gap-5">
-        <StatCard label="تغطية الاستجابات" value={`${data.responseCoverage}%`} icon={<CheckCircle className="w-5 h-5" />} tone="success" progress={{ value: data.responseCoverage }} />
-        <StatCard label="مؤشرات محققة" value={data.presentCount} icon={<CheckCircle className="w-5 h-5" />} tone="info" context={`من ${data.presentCount + data.notPresentCount + data.notApplicableCount} استجابة`} />
-        <StatCard label="فجوات مكتشفة" value={data.totalGaps} icon={<AlertTriangle className="w-5 h-5" />} tone="danger" context={`${data.openGaps} مفتوحة`} />
-        <StatCard label="تقييمات مكتملة" value={data.completedAssessments} icon={<ClipboardCheck className="w-5 h-5" />} tone="amber" context={`${data.activeAssessments} نشطة`} />
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 lg:gap-5">
+        <StatCard 
+          label="الأداء الإجمالي (مؤقت)" 
+          value={perf.provisionalPercentage !== null ? `${perf.provisionalPercentage}%` : "—"} 
+          icon={<TrendingUp className="w-5 h-5" />} 
+          tone="success" 
+        />
+        <StatCard 
+          label="متوسط المكتملة" 
+          value={perf.finalPercentage !== null ? `${perf.finalPercentage}%` : "—"} 
+          icon={<CheckCircle className="w-5 h-5" />} 
+          tone="info" 
+        />
+        <StatCard 
+          label="التقييمات المؤهلة" 
+          value={perf.eligibleAssessments} 
+          icon={<ClipboardCheck className="w-5 h-5" />} 
+          tone="amber" 
+          context={`${perf.completedAssessments} مكتمل / ${perf.inProgressAssessments} جاري`}
+        />
+        <StatCard 
+          label="عدد المقيّمين" 
+          value={perf.evaluators.length} 
+          icon={<AlertTriangle className="w-5 h-5" />} 
+          tone="violet" 
+        />
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        {/* Branch Comparison */}
-        <Card variant="primary">
-          <CardHeader>
-            <CardTitle icon={<TrendingUp className="w-5 h-5" />}>مقارنة الفروع</CardTitle>
-            <CardDescription>تغطية الاستجابات لكل فرع</CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            {data.branchComparison.length === 0 ? (
-              <EmptyState icon={<TrendingUp />} title="لا توجد فروع" compact />
-            ) : (
-              data.branchComparison.map(b => (
-                <div key={b.id}>
-                  <div className="flex items-center justify-between mb-1.5">
-                    <span className="text-sm font-medium text-foreground-strong">{b.name}</span>
-                    <span className="text-sm font-bold text-foreground-strong numeric">{b.coverage}%</span>
+        <Card>
+          <CardContent className="p-6">
+            <h3 className="font-bold mb-4">أداء المقيّمين</h3>
+            <div className="space-y-4">
+              {perf.evaluators.map((ev) => (
+                <div key={ev.id} className="space-y-1">
+                  <div className="flex justify-between text-sm">
+                    <span className="font-medium">{ev.name} ({ev.role})</span>
+                    <span className="text-muted-foreground">{ev.provisionalAverage ?? 0}%</span>
                   </div>
-                  <Progress value={b.coverage} size="sm" tone={b.coverage >= 80 ? "success" : b.coverage >= 50 ? "warning" : "danger"} />
-                  <p className="text-[12px] text-muted-foreground mt-1 numeric">{b.completed}/{b.assessments} تقييم مكتمل</p>
+                  <div className="w-full bg-surface-muted rounded-full h-4 overflow-hidden">
+                    <div 
+                      className="bg-primary h-4 rounded-full transition-all" 
+                      style={{ width: `${ev.provisionalAverage ?? 0}%` }}
+                    ></div>
+                  </div>
                 </div>
-              ))
-            )}
+              ))}
+              {perf.evaluators.length === 0 && (
+                <p className="text-muted-foreground text-center py-4">لا يوجد مقيّمون متاحون</p>
+              )}
+            </div>
           </CardContent>
         </Card>
 
-        {/* Historical Trends */}
-        <Card variant="primary">
-          <CardHeader>
-            <CardTitle icon={<ClipboardCheck className="w-5 h-5" />}>الاتجاه التاريخي</CardTitle>
-          </CardHeader>
-          <CardContent>
-            {data.history.length < 2 ? (
-              <EmptyState icon={<ClipboardCheck />} title="لا توجد بيانات تاريخية كافية" description="تحتاج تقييمين مكتملين على الأقل." compact />
-            ) : (
-              <div className="space-y-3">
-                {data.history.map((h, idx) => {
-                  const prev = idx > 0 ? data.history[idx - 1] : null
-                  const change = prev ? h.progress - prev.progress : 0
-                  return (
-                    <div key={h.id} className="flex items-center justify-between border-b border-border pb-2 last:border-0 last:pb-0">
-                      <div>
-                        <p className="text-sm font-medium text-foreground-strong numeric">{formatDate(h.date.toISOString())}</p>
-                        <p className="text-[12px] text-muted-foreground numeric">{h.gaps} فجوات • {h.responses} استجابة</p>
-                      </div>
-                      <div className="text-left">
-                        <p className="text-sm font-bold text-foreground-strong numeric">{h.progress}%</p>
-                        {change !== 0 && (
-                          <p className={`text-[12px] font-medium ${change > 0 ? "text-success" : "text-danger"}`}>
-                            {change > 0 ? `+${change}%` : `${change}%`}
-                          </p>
-                        )}
-                      </div>
-                    </div>
-                  )
-                })}
-              </div>
-            )}
+        <Card>
+          <CardContent className="p-6">
+            <h3 className="font-bold mb-4">التقييمات الأخيرة</h3>
+            <div className="divide-y divide-border">
+              {recentAssessments.map(a => (
+                <div key={a.id} className="py-3 flex justify-between items-center">
+                  <div>
+                    <p className="font-medium text-foreground-strong">{a.assessor?.name || "غير محدد"}</p>
+                    <p className="text-xs text-muted-foreground">{a.branch?.name || "كامل المدرسة"}</p>
+                  </div>
+                  <Badge variant={a.status === "COMPLETED" ? "success" : "warning"}>
+                    {a.status === "COMPLETED" ? "مكتمل" : "جاري"}
+                  </Badge>
+                </div>
+              ))}
+              {recentAssessments.length === 0 && (
+                <p className="text-muted-foreground text-center py-4">لا توجد تقييمات</p>
+              )}
+            </div>
           </CardContent>
         </Card>
       </div>
-
-      {/* Recent Assessments */}
-      <Card variant="primary">
-        <CardHeader>
-          <CardTitle icon={<ClipboardCheck className="w-5 h-5" />}>أحدث التقييمات</CardTitle>
-        </CardHeader>
-        <CardContent className="p-0">
-          {data.recentAssessments.length === 0 ? (
-            <EmptyState icon={<ClipboardCheck />} title="لا توجد تقييمات بعد" compact action={{ label: "إنشاء تقييم", href: "/quality-assessor" }} />
-          ) : (
-            <div className="overflow-x-auto">
-              <table className="w-full text-sm text-right">
-                <thead className="text-[12px] text-muted-foreground bg-surface-muted">
-                  <tr>
-                    <th className="px-4 py-3 font-medium">الفرع</th>
-                    <th className="px-4 py-3 font-medium">المقيّم</th>
-                    <th className="px-4 py-3 font-medium hidden md:table-cell">التاريخ</th>
-                    <th className="px-4 py-3 font-medium">الحالة</th>
-                    <th className="px-4 py-3 font-medium text-left">إجراء</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-border">
-                  {data.recentAssessments.map(a => (
-                    <tr key={a.id} className="hover:bg-surface-muted transition-smooth">
-                      <td className="px-4 py-3.5 font-medium text-foreground-strong">{a.branch?.name || "كامل المدرسة"}</td>
-                      <td className="px-4 py-3.5 text-muted-foreground">{a.assessor.name}</td>
-                      <td className="px-4 py-3.5 hidden md:table-cell text-muted-foreground numeric">{formatDate(a.startedAt.toISOString())}</td>
-                      <td className="px-4 py-3.5"><StatusBadge status={a.status} /></td>
-                      <td className="px-4 py-3.5">
-                        <Link href={`/quality/assessments/${a.id}/results`} className="text-secondary hover:underline text-[13px] font-medium">
-                          عرض النتائج
-                        </Link>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
-        </CardContent>
-      </Card>
     </div>
   )
 }

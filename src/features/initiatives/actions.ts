@@ -6,9 +6,7 @@ import { revalidatePath } from "next/cache"
 
 export async function saveInitiative(formData: FormData) {
   const user = await getCurrentUser()
-  // تقييد الإنشاء والتعديل لمقيم الجودة فقط
   if (!user || user.role !== "QUALITY_ASSESSOR") throw new Error("Unauthorized: Only Quality Assessors can create initiatives")
-  // ... باقي الكود
 
   const name = formData.get("name") as string
   if (!name) throw new Error("اسم المبادرة مطلوب")

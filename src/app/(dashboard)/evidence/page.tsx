@@ -8,6 +8,44 @@ import { Input } from "@/components/ui/Input"
 import { Database, Search } from "lucide-react"
 import { Button } from "@/components/ui/Button"
 
+// Official tool order as per the HTML reference file
+const OFFICIAL_TOOL_ORDER = [
+  "البيئة المدرسية",
+  "فحص الوثائق",
+  "مقابلة المدير",
+  "مقابلة المعلمين",
+  "مقابلة المتعلمين",
+  "مقابلة الموجه الطلابي",
+  "الملاحظة الصفية"
+]
+
+function getToolOrder(tool: string): number {
+  const idx = OFFICIAL_TOOL_ORDER.indexOf(tool)
+  return idx === -1 ? 999 : idx
+}
+
+function extractNumericParts(code: string): number[] {
+  const parts = code.split('-')
+  const nums: number[] = []
+  for (const p of parts) {
+    const n = parseInt(p.replace(/\D/g, ''), 10)
+    if (!isNaN(n)) nums.push(n)
+  }
+  return nums.length ? nums : [0]
+}
+
+function compareEvidenceCodes(a: string, b: string): number {
+  const numsA = extractNumericParts(a)
+  const numsB = extractNumericParts(b)
+  const maxLen = Math.max(numsA.length, numsB.length)
+  for (let i = 0; i < maxLen; i++) {
+    const va = numsA[i] ?? 0
+    const vb = numsB[i] ?? 0
+    if (va !== vb) return va - vb
+  }
+  return 0
+}
+
 export default async function EvidenceBankPage({
   searchParams,
 }: {
@@ -31,14 +69,24 @@ export default async function EvidenceBankPage({
   const evidence = await prisma.fixedEvidence.findMany({
     where,
     include: { indicator: { include: { domain: true, axis: true } } },
-    orderBy: { code: 'asc' },
-    take: 200
+    orderBy: { code: 'asc' }
+  })
+
+  // Apply official ordering: by tool order, then by numeric parts of code
+  evidence.sort((a, b) => {
+    const toolA = getToolOrder(a.tool)
+    const toolB = getToolOrder(b.tool)
+    if (toolA !== toolB) return toolA - toolB
+    return compareEvidenceCodes(a.code, b.code)
   })
 
   const tools = await prisma.fixedEvidence.findMany({
     select: { tool: true },
     distinct: ['tool']
   })
+
+  // Sort tools by official order too
+  tools.sort((a, b) => getToolOrder(a.tool) - getToolOrder(b.tool))
 
   return (
     <div className="space-y-6">
@@ -48,7 +96,6 @@ export default async function EvidenceBankPage({
         breadcrumbs={[{ label: 'الرئيسية', href: '/' }, { label: 'بنك الشواهد' }]}
       />
 
-      {/* Filter Form - تم إصلاح الفلتر */}
       <form method="GET" className="flex flex-wrap items-center gap-3 p-4 bg-surface border border-border rounded-lg">
         <div className="relative flex-1 min-w-[200px]">
           <Search className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground pointer-events-none" />

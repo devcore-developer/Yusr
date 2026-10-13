@@ -6,8 +6,7 @@ import { Input } from "@/components/ui/Input"
 import { Textarea } from "@/components/ui/Textarea"
 import { Select } from "@/components/ui/Select"
 import { saveInitiative } from "../actions"
-import { Loader2, Save, PlusCircle, Trash2, Printer, FileText } from "lucide-react"
-
+import { Loader2, Save, PlusCircle, Trash2, FileText, Upload } from "lucide-react"
 interface InitiativeFormProps {
   plans: { id: string; title: string }[]
 }
@@ -18,12 +17,32 @@ export function InitiativeForm({ plans }: InitiativeFormProps) {
   
   const [indicators, setIndicators] = useState([{ name: "", type: "", measureTool: "", target: "" }])
   const [programs, setPrograms] = useState([{ name: "", goal: "", activities: "", executor: "" }])
+  
+  // حالة المرفقات الجديدة
+  const [attachments, setAttachments] = useState<File[]>([])
 
   const handleAddIndicator = () => setIndicators([...indicators, { name: "", type: "", measureTool: "", target: "" }])
   const handleRemoveIndicator = (index: number) => setIndicators(indicators.filter((_, i) => i !== index))
   
   const handleAddProgram = () => setPrograms([...programs, { name: "", goal: "", activities: "", executor: "" }])
   const handleRemoveProgram = (index: number) => setPrograms(programs.filter((_, i) => i !== index))
+
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = e.target.files
+    if (files && files.length > 0) {
+      const newFiles = Array.from(files)
+      setAttachments(prev => [...prev, ...newFiles])
+    }
+    // مسح قيمة حقل الإدخال ليصبح فارغاً جاهزاً لاختيار ملف آخر
+    e.target.value = ""
+  }
+
+  const handleRemoveFile = (index: number) => {
+    setAttachments(prev => prev.filter((_, i) => i !== index))
+    // مسح حقل الإدخال أيضاً عند الحذف
+    const input = document.getElementById('evidence-upload') as HTMLInputElement
+    if (input) input.value = ""
+  }
 
   const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault()
@@ -33,6 +52,11 @@ export function InitiativeForm({ plans }: InitiativeFormProps) {
     const formData = new FormData(e.currentTarget)
     formData.append("indicators", JSON.stringify(indicators))
     formData.append("programs", JSON.stringify(programs))
+    
+    // ملاحظة: لرفع الملفات فعلياً إلى الخادم، يجب تحويلها إلى Base64 أو استخدام API للرفع.
+    // حالياً نكتسب بإظهارها في الواجهة فقط للتحقق من تجربة المستخدم.
+    // إذا كان لديك حقل في قاعدة البيانات لحفظ أسماء الملفات، يمكن إضافتها هنا.
+    // formData.append("attachmentNames", JSON.stringify(attachments.map(f => f.name)))
 
     try {
       await saveInitiative(formData)
@@ -94,15 +118,14 @@ export function InitiativeForm({ plans }: InitiativeFormProps) {
       {error && <div className="p-3 bg-danger/10 text-danger rounded-lg text-sm">{error}</div>}
 
       <div className="flex justify-end gap-2 no-print">
-        <Button type="button" variant="outline" size="md" icon={<Printer className="w-4 h-4" />} onClick={handlePrint}>طباعة / PDF</Button>
+        <Button type="button" variant="outline" size="md" icon={<PrinterIcon />} onClick={handlePrint}>طباعة / PDF</Button>
         <Button type="button" variant="outline" size="md" icon={<FileText className="w-4 h-4" />} onClick={handleExportWord}>Word</Button>
         <Button type="submit" disabled={loading} size="md" icon={loading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}>
           {loading ? "جاري الحفظ..." : "حفظ المبادرة"}
         </Button>
       </div>
 
-      <div className="p-6 border border-border rounded-lg">
-        
+      <div className="p-6 border border-border rounded-lg">        
         <h3 className="text-lg font-bold text-[#079FDF] mb-4">بيانات المبادرة</h3>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
           <div className="space-y-1.5">
@@ -230,10 +253,41 @@ export function InitiativeForm({ plans }: InitiativeFormProps) {
               <label className="text-sm font-medium">رابط الشاهد</label>
               <Input name="evidenceUrl" type="url" placeholder="https://" />
             </div>
-            <div className="space-y-1.5">
+            
+            {/* تم تحديث قسم رفع الشواهد هنا */}
+            <div className="space-y-2">
               <label className="text-sm font-medium">رفع الشاهد</label>
-              <Input type="file" multiple />
-              <p className="text-xs text-muted-foreground">لم تتم إضافة شواهد بعد.</p>
+              
+              {/* زر مخصص لإخفاء النص الافتراضي للمتصفح */}
+              <label htmlFor="evidence-upload" className="cursor-pointer inline-flex items-center gap-2 px-3 py-1.5 border border-slate-300 rounded-md text-xs text-slate-600 hover:bg-slate-50 transition-colors w-fit">
+                <Upload className="w-3.5 h-3.5" />
+                <span>اختر ملف</span>
+              </label>
+              
+              {/* حقل الإدخال الفعلي مخفي */}
+              <input id="evidence-upload" type="file" multiple onChange={handleFileChange} accept=".pdf,.doc,.docx,.jpg,.jpeg,.png" className="hidden" />
+              
+              <div className="mt-2 space-y-2">
+                {attachments.length === 0 ? (
+                  <p className="text-xs text-muted-foreground">لم تتم إضافة شواهد بعد.</p>
+                ) : (
+                  attachments.map((file, index) => (
+                    <div key={index} className="flex items-center justify-between gap-2 p-2 bg-slate-100 rounded-md">
+                      <div className="flex items-center gap-2 min-w-0">
+                        <FileText className="w-4 h-4 text-slate-500 shrink-0" />
+                        <span className="text-xs text-slate-700 truncate">{file.name}</span>
+                      </div>
+                      <button 
+                        type="button" 
+                        onClick={() => handleRemoveFile(index)}
+                        className="text-red-500 hover:text-red-700 shrink-0"
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </button>
+                    </div>
+                  ))
+                )}
+              </div>
             </div>
           </div>
         </div>
@@ -259,5 +313,16 @@ export function InitiativeForm({ plans }: InitiativeFormProps) {
       </div>
 
     </form>
+  )
+}
+
+// Helper component to avoid import issues if PrinterIcon is not available
+function PrinterIcon() {
+  return (
+    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <polyline points="6 9 6 2 18 2 18 9"></polyline>
+      <path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"></path>
+      <rect x="6" y="14" width="12" height="8"></rect>
+    </svg>
   )
 }

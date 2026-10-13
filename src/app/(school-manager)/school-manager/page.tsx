@@ -11,6 +11,8 @@ import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/Card"
 import { Badge } from "@/components/ui/Badge"
 import { VerticalBarChart, HorizontalBarChart } from "@/components/charts/AnalyticsCharts"
 import { Building2, Users, ClipboardCheck, AlertTriangle, RefreshCw, TrendingUp, FileCheck, ArrowLeft } from "lucide-react"
+import { getSchoolAnalytics, getBranchAnalytics } from "@/features/quality-reports/services/analytics"
+import { getPerformanceBand } from "@/features/quality-assessment/services/analysis"
 
 export default async function SchoolManagerDashboard() {
   const user = await getCurrentUser()
@@ -20,17 +22,17 @@ export default async function SchoolManagerDashboard() {
   if (user.role === "BRANCH_MANAGER") {
     if (!user.branchId) redirect("/login")
 
-    const [usersCount, activeAssessments, openGaps, assessments, recentAssessmentsRaw, branchGaps, delayedPlans, recentActivities, domains, verifiedEvidence] = await Promise.all([
+    // استخدام دالة التجميع الموحدة لحساب الأداء
+    const perf = await getBranchAnalytics(user.branchId)
+
+    const [usersCount, recentAssessmentsRaw, branchGaps, delayedPlans, recentActivities, domains, verifiedEvidence] = await Promise.all([
       prisma.user.count({ where: { branchId: user.branchId } }),
-      prisma.assessment.count({ where: { branchId: user.branchId, status: "IN_PROGRESS", type: { not: "PRIVATE_REVIEW" } } }),
-      prisma.gap.count({ where: { branchId: user.branchId, status: "OPEN", assessment: { type: { not: "PRIVATE_REVIEW" } } } }),
-      prisma.assessment.findMany({ where: { branchId: user.branchId, type: { not: "PRIVATE_REVIEW" } }, select: { progress: true } }),
       prisma.assessment.findMany({
-        where: { branchId: user.branchId, type: { not: "PRIVATE_REVIEW" } }, take: 5, orderBy: { startedAt: "desc" },
+        where: { branchId: user.branchId, type: "NORMAL" }, take: 5, orderBy: { startedAt: "desc" },
         include: { school: { select: { name: true } }, assessor: { select: { name: true } } }
       }),
       prisma.gap.findMany({
-        where: { branchId: user.branchId, status: "OPEN", assessment: { type: { not: "PRIVATE_REVIEW" } } }, take: 4,
+        where: { branchId: user.branchId, status: "OPEN", assessment: { type: "NORMAL" } }, take: 4,
         include: { indicator: true }
       }),
       prisma.improvementPlan.findMany({
@@ -42,14 +44,11 @@ export default async function SchoolManagerDashboard() {
       }),
       prisma.domain.findMany({ include: { indicators: { include: { fixedEvidence: true } } } }),
       prisma.evidenceResponse.findMany({
-        where: { isVerified: true, assessment: { branchId: user.branchId, type: { not: "PRIVATE_REVIEW" } } },
+        where: { isVerified: true, assessment: { branchId: user.branchId, type: "NORMAL", status: { in: ["IN_PROGRESS", "COMPLETED"] } } },
         include: { evidence: { include: { indicator: { include: { domain: true } } } } }
       })
     ])
 
-    const avgProgress = assessments.length > 0 ? Math.round(assessments.reduce((acc, a) => acc + a.progress, 0) / assessments.length) : 0
-
-    // Branch Domain Performance Calculation
     const domainPerformance = domains.map(d => {
       const req = d.indicators.reduce((acc, i) => acc + i.fixedEvidence.length, 0)
       const ver = verifiedEvidence.filter(v => v.evidence.indicator.domain.id === d.id).length
@@ -66,9 +65,14 @@ export default async function SchoolManagerDashboard() {
         
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 lg:gap-5">
           <StatCard label="مستخدمو الفرع" value={usersCount} icon={<Users className="w-5 h-5" />} tone="info" />
-          <StatCard label="التقييمات النشطة" value={activeAssessments} icon={<ClipboardCheck className="w-5 h-5" />} tone="amber" />
-          <StatCard label="الفجوات المفتوحة" value={openGaps} icon={<AlertTriangle className="w-5 h-5" />} tone="danger" />
-          <StatCard label="نسبة إنجاز التقييم" value={`${avgProgress}%`} icon={<TrendingUp className="w-5 h-5" />} tone="success" progress={{ value: avgProgress }} />
+          <StatCard label="التقييمات المؤهلة" value={perf.eligibleAssessments} icon={<ClipboardCheck className="w-5 h-5" />} tone="amber" />
+          <StatCard label="الفجوات المفتوحة" value={branchGaps.length} icon={<AlertTriangle className="w-5 h-5" />} tone="danger" />
+          <StatCard 
+            label="الأداء الإجمالي للفرع" 
+            value={perf.provisionalPercentage !== null ? `${perf.provisionalPercentage}%` : "—"} 
+            icon={<TrendingUp className="w-5 h-5" />} 
+            tone="success" 
+          />
         </div>
 
         <Card className="p-6">
@@ -85,7 +89,6 @@ export default async function SchoolManagerDashboard() {
             <RecentAssessments assessments={recentAssessmentsRaw} />
           </div>
           
-          {/* Top Gaps for Branch */}
           <Card className="p-6 flex flex-col">
             <CardHeader className="px-0 pt-0 flex-row items-center justify-between">
               <CardTitle>أبرز الفجوات</CardTitle>
@@ -148,24 +151,20 @@ export default async function SchoolManagerDashboard() {
   // === لوحة تحكم مدير المدرسة ===
   const schoolId = user.schoolId
 
+  // استخدام دالة التجميع الموحدة للمدرسة
+  const perf = await getSchoolAnalytics(schoolId)
+
   const [
-    school, branchesCount, usersCount, activeAssessments, completedAssessments,
-    openGaps, totalGaps, verifiedEvidence, recentAssessmentsRaw, recentActivities,
-    delayedPlans, highSeverityGaps, branches, domains, topSchoolGaps
+    school, branchesCount, usersCount, openGaps, totalGaps, recentAssessmentsRaw, recentActivities,
+    delayedPlans, domains, verifiedEvidence
   ] = await Promise.all([
     prisma.school.findUnique({ where: { id: schoolId }, select: { name: true, status: true } }),
     prisma.branch.count({ where: { schoolId } }),
     prisma.user.count({ where: { schoolId } }),
-    prisma.assessment.count({ where: { schoolId, status: "IN_PROGRESS", type: { not: "PRIVATE_REVIEW" } } }),
-    prisma.assessment.count({ where: { schoolId, status: "COMPLETED", type: { not: "PRIVATE_REVIEW" } } }),
-    prisma.gap.count({ where: { schoolId, status: "OPEN", assessment: { type: { not: "PRIVATE_REVIEW" } } } }),
-    prisma.gap.count({ where: { schoolId, assessment: { type: { not: "PRIVATE_REVIEW" } } } }),
-    prisma.evidenceResponse.findMany({
-      where: { assessment: { schoolId, type: { not: "PRIVATE_REVIEW" } }, isVerified: true },
-      select: { evidence: { select: { indicator: { select: { domain: { select: { id: true, name: true } } } } } } },
-    }),
+    prisma.gap.count({ where: { schoolId, status: "OPEN", assessment: { type: "NORMAL" } } }),
+    prisma.gap.count({ where: { schoolId, assessment: { type: "NORMAL" } } }),
     prisma.assessment.findMany({
-      where: { schoolId, type: { not: "PRIVATE_REVIEW" } }, take: 6, orderBy: { startedAt: "desc" },
+      where: { schoolId, type: "NORMAL" }, take: 6, orderBy: { startedAt: "desc" },
       include: { school: { select: { id: true, name: true } }, branch: { select: { name: true } }, assessor: { select: { name: true } } },
     }),
     prisma.activity.findMany({
@@ -175,31 +174,46 @@ export default async function SchoolManagerDashboard() {
     prisma.improvementPlan.findMany({
       where: { schoolId, targetDate: { lt: new Date() }, status: { not: "COMPLETED" } }, take: 5,
     }),
-    prisma.gap.findMany({ where: { schoolId, severity: "HIGH", status: "OPEN", assessment: { type: { not: "PRIVATE_REVIEW" } } }, take: 5 }),
-    prisma.branch.findMany({ where: { schoolId }, include: { assessments: { where: { type: { not: "PRIVATE_REVIEW" } } } } }),
     prisma.domain.findMany({ include: { indicators: { include: { fixedEvidence: true } } } }),
-    // جلب أبرز الفجوات للمدرسة
-    prisma.gap.findMany({
-      where: { schoolId, status: "OPEN", assessment: { type: { not: "PRIVATE_REVIEW" } } },
-      take: 5,
-      orderBy: [{ severity: "desc" }, { createdAt: "desc" }],
-      include: { indicator: { include: { domain: true } }, branch: { select: { name: true } } }
+    prisma.evidenceResponse.findMany({
+      where: { assessment: { schoolId, type: "NORMAL", status: { in: ["IN_PROGRESS", "COMPLETED"] } }, isVerified: true },
+      select: { evidence: { select: { indicator: { select: { domain: { select: { id: true, name: true } } } } } } },
     })
   ])
 
   if (!school) return null
 
-  // 1. School Domain Performance Calculation
   const domainPerformance = domains.map(d => {
     const req = d.indicators.reduce((acc, i) => acc + i.fixedEvidence.length, 0)
     const ver = verifiedEvidence.filter(v => v.evidence.indicator.domain.id === d.id).length
     return { name: d.name, percentage: req > 0 ? Math.round((ver / req) * 100) : null }
   })
 
-  // 2. Branch Comparison Calculation
-  const branchComparison = branches.map(b => {
-    const progress = b.assessments.length > 0 ? Math.round(b.assessments.reduce((acc, a) => acc + a.progress, 0) / b.assessments.length) : 0
-    return { name: b.name, percentage: progress > 0 ? progress : null }
+  // تجميع بيانات مقارنة الفروع بناءً على البيانات الموحدة
+  const branchStatsMap = new Map<string, { name: string, assessments: number, score: number }>()
+  for (const a of perf.assessments) {
+    if (a.branchId) {
+      if (!branchStatsMap.has(a.branchId)) {
+        branchStatsMap.set(a.branchId, { name: a.branchName || "غير محدد", assessments: 0, score: 0 })
+      }
+      const stat = branchStatsMap.get(a.branchId)!
+      stat.assessments++
+      stat.score += a.score
+    }
+  }
+  
+  const branchComparisonData = Array.from(branchStatsMap.values()).map(b => {
+    return {
+      name: b.name,
+      percentage: b.assessments > 0 ? Math.round(b.score / b.assessments) : null
+    }
+  })
+
+  const topSchoolGaps = await prisma.gap.findMany({
+    where: { schoolId, status: "OPEN", assessment: { type: "NORMAL" } },
+    take: 5,
+    orderBy: [{ severity: "desc" }, { createdAt: "desc" }],
+    include: { indicator: { include: { domain: true } }, branch: { select: { name: true } } }
   })
 
   return (
@@ -218,11 +232,15 @@ export default async function SchoolManagerDashboard() {
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 lg:gap-5">
         <StatCard label="الفروع" value={branchesCount} icon={<Building2 className="w-5 h-5" />} tone="info" context={`${branchesCount} فرع نشط`} />
         <StatCard label="المستخدمون" value={usersCount} icon={<Users className="w-5 h-5" />} tone="violet" context={`${usersCount} مستخدم مسجل`} />
-        <StatCard label="تقييمات نشطة" value={activeAssessments} icon={<ClipboardCheck className="w-5 h-5" />} tone="amber" status={{ label: `${completedAssessments} مكتمل`, tone: 'success' }} />
-        <StatCard label="فجوات مفتوحة" value={openGaps} icon={<AlertTriangle className="w-5 h-5" />} tone="danger" context={`${totalGaps} إجمالي الفجوات`} />
+        <StatCard label="تقييمات مؤهلة" value={perf.eligibleAssessments} icon={<ClipboardCheck className="w-5 h-5" />} tone="amber" status={{ label: `${perf.completedAssessments} مكتمل`, tone: 'success' }} />
+        <StatCard 
+          label="الأداء الإجمالي للمدرسة" 
+          value={perf.provisionalPercentage !== null ? `${perf.provisionalPercentage}%` : "—"} 
+          icon={<TrendingUp className="w-5 h-5" />} 
+          tone="success" 
+        />
       </div>
 
-      {/* Analytics Charts */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 lg:gap-6">
         <Card className="p-6">
           <CardHeader className="px-0 pt-0">
@@ -237,18 +255,16 @@ export default async function SchoolManagerDashboard() {
             <CardTitle>تقدم التقييم في الفروع</CardTitle>
           </CardHeader>
           <CardContent className="px-0">
-            <HorizontalBarChart data={branchComparison} />
+            <HorizontalBarChart data={branchComparisonData} />
           </CardContent>
         </Card>
       </div>
 
-      {/* Top Gaps & Recent Assessments */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 lg:gap-6">
         <div className="lg:col-span-2">
           <RecentAssessments assessments={recentAssessmentsRaw} />
         </div>
         
-        {/* Top Gaps for School */}
         <Card className="p-6 flex flex-col">
           <CardHeader className="px-0 pt-0 flex-row items-center justify-between">
             <CardTitle>أبرز الفجوات</CardTitle>
