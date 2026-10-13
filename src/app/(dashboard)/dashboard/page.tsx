@@ -28,8 +28,15 @@ export default async function Home() {
     prisma.improvementPlan.count(),
     prisma.school.findMany({ include: { _count: { select: { branches: true } }, assessments: { where: { type: { not: "PRIVATE_REVIEW" } } } } }),
     prisma.domain.findMany({ include: { indicators: { include: { fixedEvidence: true } } } }),
+    // الإصلاح هنا: جلب الشواهد من التقييمات الجارية والمكتملة معاً
     prisma.evidenceResponse.findMany({
-      where: { isVerified: true, assessment: { type: { not: "PRIVATE_REVIEW" }, status: "COMPLETED" } },
+      where: { 
+        isVerified: true, 
+        assessment: { 
+          type: { not: "PRIVATE_REVIEW" }, 
+          status: { in: ["IN_PROGRESS", "COMPLETED"] } 
+        } 
+      },
       include: { evidence: { include: { indicator: { include: { domain: true } } } } }
     }),
     prisma.gap.findMany({
