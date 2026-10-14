@@ -5,7 +5,13 @@ import { prisma } from "@/lib/prisma"
 export async function getCurrentUser() {
   const session = await auth()
   if (!session?.user) return null
-  return session.user
+  
+  // جلب أحدث بيانات من قاعدة البيانات لضمان ظهور التحديثات فوراً (مثل تغيير الاسم)
+  const dbUser = await prisma.user.findUnique({
+    where: { id: session.user.id }
+  })
+
+  return dbUser
 }
 
 export async function requireRole(roles: string[]) {

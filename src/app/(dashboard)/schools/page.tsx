@@ -5,7 +5,7 @@ import { Card, CardContent } from "@/components/ui/Card"
 import { Button } from "@/components/ui/Button"
 import { Badge, StatusBadge } from "@/components/ui/Badge"
 import { Input } from "@/components/ui/Input"
-import { Select } from "@/components/ui/Select"
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/Select"
 import { EmptyState } from "@/components/ui/EmptyState"
 import {
   School as SchoolIcon, Search, Plus, MapPin, Building2, Users,
@@ -13,6 +13,7 @@ import {
 } from "lucide-react"
 import Link from "next/link"
 import { formatDate } from "@/lib/utils"
+import { SchoolDeleteButton } from "@/components/admin/SchoolDeleteButton"
 
 export const metadata = { title: "المدارس" }
 
@@ -74,18 +75,21 @@ export default async function SchoolsPage({
         }
       />
 
-      {/* Filter bar */}
-      <form className="flex flex-wrap items-center gap-3 p-4 bg-surface border border-border rounded-lg">
-        <div className="relative flex-1 min-w-[200px]">
+      <form className="flex flex-wrap items-center gap-3 p-4 bg-surface border border-border rounded-lg min-w-0">
+        <div className="relative flex-1 min-w-[200px] min-w-0">
           <Search className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground pointer-events-none" />
-          <Input name="q" defaultValue={q} placeholder="ابحث باسم المدرسة أو الموقع..." className="pr-10" />
+          <Input name="q" defaultValue={q} placeholder="ابحث باسم المدرسة أو الموقع..." className="pr-10 w-full" />
         </div>
-        <Select name="status" defaultValue={status} className="w-auto min-w-[120px]">
-          <option value="">كل الحالات</option>
-          <option value="ACTIVE">نشط</option>
-          <option value="SUSPENDED">موقوف</option>
-          <option value="EXPIRED">منتهي</option>
-          <option value="PENDING">قيد الانتظار</option>
+        <Select name="status" defaultValue={status}>
+          <SelectTrigger className="w-full sm:w-auto sm:min-w-[120px]">
+            <SelectValue placeholder="كل الحالات" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="ACTIVE">نشط</SelectItem>
+            <SelectItem value="SUSPENDED">موقوف</SelectItem>
+            <SelectItem value="EXPIRED">منتهي</SelectItem>
+            <SelectItem value="PENDING">قيد الانتظار</SelectItem>
+          </SelectContent>
         </Select>
         <Button type="submit" variant="primary" size="md" icon={<Search className="w-4 h-4" />}>تصفية</Button>
         {hasFilters && (
@@ -95,14 +99,13 @@ export default async function SchoolsPage({
         )}
       </form>
 
-      <p className="text-[13px] text-muted-foreground">
+      <p className="text-[13px] text-muted-foreground min-w-0">
         <span className="numeric font-medium text-foreground-strong">{total}</span> مدرسة
         {hasFilters && ' مطابقة للفلترة'}
       </p>
 
-      {/* Schools table */}
       <Card variant="primary">
-        <CardContent className="p-0">
+        <CardContent className="p-0 min-w-0">
           {schools.length === 0 ? (
             <EmptyState
               icon={<SchoolIcon />}
@@ -113,7 +116,7 @@ export default async function SchoolsPage({
             />
           ) : (
             <div className="overflow-x-auto scrollbar-thin">
-              <table className="w-full text-sm text-right">
+              <table className="w-full text-sm text-right min-w-[600px]">
                 <thead className="text-[12px] text-muted-foreground bg-surface-muted uppercase">
                   <tr>
                     <th className="px-4 py-3.5 font-medium">المدرسة</th>
@@ -171,6 +174,7 @@ export default async function SchoolsPage({
                             <Link href={`/schools/${school.id}`}>
                               <Button variant="ghost" size="icon-sm" aria-label="عرض" icon={<Eye className="w-4 h-4" />} />
                             </Link>
+                            <SchoolDeleteButton schoolId={school.id} schoolName={school.name} />
                           </div>
                         </td>
                       </tr>
@@ -183,9 +187,8 @@ export default async function SchoolsPage({
         </CardContent>
       </Card>
 
-      {/* Pagination */}
       {totalPages > 1 && (
-        <div className="flex items-center justify-between">
+        <div className="flex items-center justify-between min-w-0">
           <p className="text-[13px] text-muted-foreground">
             صفحة <span className="numeric font-medium text-foreground-strong">{page}</span> من{' '}
             <span className="numeric font-medium text-foreground-strong">{totalPages}</span>

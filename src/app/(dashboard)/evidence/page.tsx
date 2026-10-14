@@ -96,15 +96,15 @@ export default async function EvidenceBankPage({
         breadcrumbs={[{ label: 'الرئيسية', href: '/' }, { label: 'بنك الشواهد' }]}
       />
 
-      <form method="GET" className="flex flex-wrap items-center gap-3 p-4 bg-surface border border-border rounded-lg">
-        <div className="relative flex-1 min-w-[200px]">
+      <form method="GET" className="flex flex-wrap items-center gap-3 p-4 bg-surface border border-border rounded-lg min-w-0">
+        <div className="relative flex-1 min-w-[200px] min-w-0">
           <Search className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground pointer-events-none" />
-          <Input name="q" defaultValue={q} placeholder="ابحث في نص الشاهد أو الكود..." className="pr-10" />
+          <Input name="q" defaultValue={q} placeholder="ابحث في نص الشاهد أو الكود..." className="pr-10 w-full" />
         </div>
         <select 
           name="tool" 
           defaultValue={tool || ""}
-          className="h-10 px-3 rounded-md border border-border bg-surface text-sm min-w-[180px]"
+          className="h-10 px-3 rounded-md border border-border bg-surface text-sm w-full sm:w-auto sm:min-w-[180px]"
         >
           <option value="">كل الأدوات</option>
           {tools.map((t: any) => (
@@ -114,11 +114,12 @@ export default async function EvidenceBankPage({
         <Button type="submit" variant="primary" size="md" icon={<Search className="w-4 h-4" />}>تصفية</Button>
       </form>
 
-      <p className="text-[13px] text-muted-foreground">
+      <p className="text-[13px] text-muted-foreground min-w-0">
         <span className="numeric font-medium text-foreground-strong">{evidence.length}</span> شاهد مطابق
       </p>
 
-      <Card className="overflow-hidden">
+      {/* Desktop Table Layout */}
+      <Card className="overflow-hidden hidden md:block">
         <CardContent className="p-0">
           <div className="overflow-x-auto scrollbar-thin">
             <table className="w-full text-sm text-right min-w-[800px]">
@@ -135,7 +136,7 @@ export default async function EvidenceBankPage({
                 {evidence.map((ev: any) => (
                   <tr key={ev.id} className="hover:bg-surface-muted/50 transition-smooth">
                     <td className="px-4 py-3 font-mono text-secondary text-[12px] whitespace-nowrap">{ev.code}</td>
-                    <td className="px-4 py-3 text-foreground-strong">{ev.text}</td>
+                    <td className="px-4 py-3 text-foreground-strong break-words min-w-[200px]">{ev.text}</td>
                     <td className="px-4 py-3 text-muted-foreground text-[13px]">{ev.indicator?.code}</td>
                     <td className="px-4 py-3 text-muted-foreground text-[13px]">{ev.indicator?.domain?.name}</td>
                     <td className="px-4 py-3"><Badge variant="neutral">{ev.tool}</Badge></td>
@@ -146,6 +147,23 @@ export default async function EvidenceBankPage({
           </div>
         </CardContent>
       </Card>
+
+      {/* Mobile Card Layout */}
+      <div className="grid grid-cols-1 gap-4 md:hidden min-w-0">
+        {evidence.map((ev: any) => (
+          <Card key={ev.id} className="p-4 min-w-0">
+            <div className="flex items-center justify-between mb-2">
+              <span className="font-mono text-secondary text-[12px] break-all">{ev.code}</span>
+              <Badge variant="neutral">{ev.tool}</Badge>
+            </div>
+            <p className="text-sm text-foreground-strong mb-3 break-words">{ev.text}</p>
+            <div className="border-t pt-2 space-y-1 text-xs text-muted-foreground">
+              <p><span className="font-medium">المؤشر:</span> {ev.indicator?.code}</p>
+              <p><span className="font-medium">المجال:</span> {ev.indicator?.domain?.name}</p>
+            </div>
+          </Card>
+        ))}
+      </div>
     </div>
   )
 }

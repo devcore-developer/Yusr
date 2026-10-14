@@ -37,13 +37,14 @@ const ROUTE_LABELS: Record<string, string> = {
   results: 'النتائج',
   add: 'إضافة',
   new: 'جديد',
-  evidence: 'بنك الشواهد', // تمت الإضافة
-  surveys: 'نتائج الاستبانات', // تمت الإضافة
-  initiative: 'إنشاء مبادرة', // تمت الإضافة
-  'follow-up': 'المتابعة والأثر', // تمت الإضافة
-  'branch-profile': 'بيانات الفرع', // تمت الإضافة
-  print: 'طباعة التقرير', // تمت الإضافة
+  evidence: 'بنك الشواهد',
+  surveys: 'نتائج الاستبانات',
+  initiative: 'إنشاء مبادرة',
+  'follow-up': 'المتابعة والأثر',
+  'branch-profile': 'بيانات الفرع',
+  print: 'طباعة التقرير',
 }
+
 function isIdSegment(seg: string): boolean {
   return seg.length > 15 && /^[a-zA-Z0-9_-]+$/.test(seg);
 }
@@ -87,14 +88,25 @@ export function Header({ title, breadcrumbs, user, onMenuClick, schoolContext }:
   const userName = user?.name ?? 'م'
 
   return (
-    <header className="h-header bg-surface/80 backdrop-blur-md border-b border-border flex items-center justify-between gap-4 px-4 lg:px-8 sticky top-0 z-30">
-      {/* ===== Right side (Title & Breadcrumb) ===== */}
+    <header className="h-header bg-surface/80 backdrop-blur-md border-b border-border flex items-center justify-between gap-4 px-4 lg:px-8 sticky top-0 z-30 w-full max-w-full overflow-hidden">
       <div className="flex items-center gap-3 flex-1 min-w-0 overflow-hidden">
         <Button variant="ghost" size="icon" className="lg:hidden shrink-0" onClick={onMenuClick} aria-label="فتح القائمة">
           <Menu className="w-5 h-5" />
         </Button>
         
-        {/* School Branding in Header */}
+        {/* Platform Logo - Text hidden on desktop to avoid redundancy with sidebar */}
+        <Link href="/" className="flex items-center gap-2 shrink-0">
+          <img 
+            src="/logo.png" 
+            alt="منصة يُسر" 
+            className="w-8 h-8 shrink-0 object-contain" 
+          />
+          {/* يظهر فقط في الموبايل للحفاظ على الهوية، ويختفي في الديسكتوب */}
+          <span className="font-bold text-foreground-strong whitespace-nowrap lg:hidden truncate">
+            يُسر
+          </span>
+        </Link>
+
         {schoolContext && (
           <div className="hidden md:flex items-center gap-2 border-l border-border pl-3 shrink-0">
             {schoolContext.logoUrl ? (
@@ -109,21 +121,18 @@ export function Header({ title, breadcrumbs, user, onMenuClick, schoolContext }:
             </span>
           </div>
         )}
-        <div className="min-w-0 flex-1">
-          {/* عنوان الصفحة - مساحة كافية لمنع اختفاء الحروف */}
+        <div className="min-w-0 flex-1 hidden sm:block">
           <h1 className="text-sm lg:text-base font-bold text-foreground-strong tracking-tight whitespace-nowrap overflow-hidden text-ellipsis w-full">
             {title}
           </h1>
-          {/* مسار التنقل - منع التفاف النص */}
-          <div className="hidden sm:flex items-center min-w-0 mt-0.5 whitespace-nowrap overflow-hidden text-ellipsis">
+          <div className="flex items-center min-w-0 mt-0.5 whitespace-nowrap overflow-hidden text-ellipsis">
             <Breadcrumb items={crumbs} />
           </div>
         </div>
       </div>
 
-      {/* ===== Left side (Actions) ===== */}
       <div className="flex items-center gap-2 lg:gap-3 shrink-0">
-        <GlobalSearch />
+        <div className="hidden sm:block"><GlobalSearch /></div>
         <NotificationPanel notifications={[]} />
         <button
           className="flex items-center gap-2 p-1 pr-2 rounded-full hover:bg-surface-muted transition-smooth"

@@ -6,6 +6,8 @@ import { Textarea } from "@/components/ui/Textarea"
 import { Badge } from "@/components/ui/Badge"
 import { useToast } from "@/components/ui/Toast"
 import { generateAIResponse } from "../actions"
+import ReactMarkdown from "react-markdown"
+import remarkGfm from "remark-gfm"
 import {
   Sparkles, Send, Loader2, TrendingUp, AlertTriangle,
   ClipboardCheck, BarChart3
@@ -19,7 +21,9 @@ interface Message {
 
 export function ChatInterface() {
   const { toast } = useToast()
-  const [messages, setMessages] = useState<Message[]>([])
+  const [messages, setMessages] = useState<Message[]>([
+    { role: "assistant", content: "مرحباً! أنا المساعد الذكي لمنصة يُسر. اسألني عن المدارس، الفجوات، أو خطط التحسين." }
+  ])
   const [input, setInput] = useState("")
   const [loading, setLoading] = useState(false)
 
@@ -41,15 +45,14 @@ export function ChatInterface() {
   }
 
   const suggestions = [
-    { icon: <AlertTriangle className="w-4 h-4" />, text: "ما أهم الفجوات الحالية؟", tone: "danger" as const },
-    { icon: <ClipboardCheck className="w-4 h-4" />, text: "لخص أداء التقييمات الأخيرة", tone: "info" as const },
+    { icon: <AlertTriangle className="w-4 h-4" />, text: "عندنا كام مدرسة؟", tone: "danger" as const },
+    { icon: <ClipboardCheck className="w-4 h-4" />, text: "ما أهم الفجوات الحالية؟", tone: "info" as const },
     { icon: <TrendingUp className="w-4 h-4" />, text: "ما المجالات التي تحتاج متابعة؟", tone: "warning" as const },
     { icon: <BarChart3 className="w-4 h-4" />, text: "حلل تقدم خطط التحسين", tone: "violet" as const },
   ]
 
   return (
     <div className="space-y-4">
-      {/* AI context header */}
       <div className="flex items-center gap-3 p-4 bg-violet/5 border border-violet/15 rounded-lg">
         <div className="w-10 h-10 rounded-lg bg-violet/10 flex items-center justify-center shrink-0">
           <Sparkles className="w-5 h-5 text-violet" />
@@ -61,30 +64,24 @@ export function ChatInterface() {
         <Badge variant="violet" dot>متصل</Badge>
       </div>
 
-      {/* Conversation area */}
       <div className="bg-surface border border-border rounded-lg overflow-hidden shadow-premium">
-        {/* Messages */}
         <div className="p-4 lg:p-6 space-y-4 min-h-[320px] max-h-[500px] overflow-y-auto scrollbar-thin">
-          {messages.length === 0 && (
-            <div className="flex flex-col items-center justify-center py-10 text-center">
+          {messages.length === 1 && messages[0].role === "assistant" && (
+            <div className="flex flex-col items-center justify-center py-6 text-center">
               <div className="w-14 h-14 rounded-full bg-violet/10 flex items-center justify-center mb-4">
                 <Sparkles className="w-7 h-7 text-violet" />
               </div>
               <h3 className="text-base font-semibold text-foreground-strong">كيف يمكنني مساعدتك؟</h3>
-              <p className="text-sm text-muted-foreground mt-1 mb-5">اختر سؤالاً مقترحاً أو اكتب سؤالك الخاص</p>
-
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 w-full max-w-lg">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 w-full max-w-lg mt-5">
                 {suggestions.map((s) => (
                   <button
                     key={s.text}
                     onClick={() => handleSend(s.text)}
-                    className="flex items-center gap-2 p-3 text-right rounded-lg border border-border bg-surface hover:bg-surface-muted hover:border-violet/30 transition-smooth group"
+                    className="flex items-center gap-2 p-3 text-right rounded-lg border border-border bg-surface hover:bg-surface-muted hover:border-violet/30 transition-smooth"
                   >
                     <div className={cn(
                       "w-8 h-8 rounded-lg flex items-center justify-center shrink-0",
-                      s.tone === "danger" ? "tint-danger" :
-                      s.tone === "info" ? "tint-info" :
-                      s.tone === "warning" ? "tint-amber" : "tint-violet"
+                      s.tone === "danger" ? "tint-danger" : s.tone === "info" ? "tint-info" : s.tone === "warning" ? "tint-amber" : "tint-violet"
                     )}>
                       {s.icon}
                     </div>
@@ -103,13 +100,15 @@ export function ChatInterface() {
                   ? "bg-primary text-primary-foreground rounded-tl-none"
                   : "bg-surface-muted border border-border rounded-tr-none"
               )}>
-                {msg.role === "assistant" && (
-                  <div className="flex items-center gap-1.5 mb-2 pb-2 border-b border-border">
-                    <Sparkles className="w-3.5 h-3.5 text-violet" />
-                    <span className="text-[11px] font-medium text-violet">تحليل المساعد</span>
+                {msg.role === "user" ? (
+                  <p className="text-sm whitespace-pre-wrap leading-relaxed">{msg.content}</p>
+                ) : (
+                  <div className="text-sm leading-relaxed text-foreground-strong prose prose-sm max-w-none prose-headings:font-bold prose-ul:pr-4 prose-ol:pr-4 prose-li:mb-1">
+                    <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                      {msg.content}
+                    </ReactMarkdown>
                   </div>
                 )}
-                <p className="text-sm whitespace-pre-wrap leading-relaxed">{msg.content}</p>
               </div>
             </div>
           ))}
@@ -124,7 +123,6 @@ export function ChatInterface() {
           )}
         </div>
 
-        {/* Input area */}
         <div className="border-t border-border p-3 lg:p-4 flex gap-2 items-end">
           <Textarea
             placeholder="اكتب سؤالك هنا..."

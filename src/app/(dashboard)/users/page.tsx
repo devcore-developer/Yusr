@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/Button"
 import { Avatar } from "@/components/ui/Avatar"
 import { Badge, StatusBadge } from "@/components/ui/Badge"
 import { Input } from "@/components/ui/Input"
-import { Select } from "@/components/ui/Select"
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/Select"
 import { EmptyState } from "@/components/ui/EmptyState"
 import { ChevronLeft, ChevronRight, Search, Users as UsersIcon, UserPlus, Eye, Pencil, FilterX } from "lucide-react"
 import Link from "next/link"
@@ -34,7 +34,6 @@ export default async function UsersPage({
   const page = parseInt(typeof searchParams.page === 'string' ? searchParams.page : '1') || 1
   const pageSize = 10
 
-  // Build where clause
   const where: Record<string, unknown> = {}
   if (q) {
     where.OR = [
@@ -69,7 +68,6 @@ export default async function UsersPage({
   const totalPages = Math.max(1, Math.ceil(total / pageSize))
   const hasFilters = !!(q || role || status)
 
-  // Build pagination URL preserving filters
   const buildPageUrl = (p: number) => {
     const params = new URLSearchParams()
     if (q) params.set('q', q)
@@ -92,9 +90,8 @@ export default async function UsersPage({
         }
       />
 
-      {/* ===== Filter Bar (Brief #29) ===== */}
-      <form className="flex flex-wrap items-center gap-3 p-4 bg-surface border border-border rounded-lg">
-        <div className="relative flex-1 min-w-[200px]">
+      <form className="flex flex-wrap items-center gap-3 p-4 bg-surface border border-border rounded-lg min-w-0">
+        <div className="relative flex-1 min-w-[200px] min-w-0">
           <Search className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground pointer-events-none" />
           <Input
             name="q"
@@ -103,18 +100,26 @@ export default async function UsersPage({
             className="pr-10"
           />
         </div>
-        <Select name="role" defaultValue={role} className="w-auto min-w-[140px]">
-          <option value="">كل الأدوار</option>
-          <option value="SUPER_ADMIN">مدير النظام</option>
-          <option value="SCHOOL_MANAGER">مدير مدرسة</option>
-          <option value="BRANCH_MANAGER">مدير فرع</option>
-          <option value="QUALITY_ASSESSOR">مقيم جودة</option>
+        <Select name="role" defaultValue={role}>
+          <SelectTrigger className="w-full sm:w-auto sm:min-w-[140px]">
+            <SelectValue placeholder="كل الأدوار" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="SUPER_ADMIN">مدير النظام</SelectItem>
+            <SelectItem value="SCHOOL_MANAGER">مدير مدرسة</SelectItem>
+            <SelectItem value="BRANCH_MANAGER">مدير فرع</SelectItem>
+            <SelectItem value="QUALITY_ASSESSOR">مقيم جودة</SelectItem>
+          </SelectContent>
         </Select>
-        <Select name="status" defaultValue={status} className="w-auto min-w-[120px]">
-          <option value="">كل الحالات</option>
-          <option value="ACTIVE">نشط</option>
-          <option value="INVITED">مدعو</option>
-          <option value="SUSPENDED">موقوف</option>
+        <Select name="status" defaultValue={status}>
+          <SelectTrigger className="w-full sm:w-auto sm:min-w-[120px]">
+            <SelectValue placeholder="كل الحالات" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="ACTIVE">نشط</SelectItem>
+            <SelectItem value="INVITED">مدعو</SelectItem>
+            <SelectItem value="SUSPENDED">موقوف</SelectItem>
+          </SelectContent>
         </Select>
         <Button type="submit" variant="primary" size="md" icon={<Search className="w-4 h-4" />}>
           تصفية
@@ -128,17 +133,15 @@ export default async function UsersPage({
         )}
       </form>
 
-      {/* ===== Results count ===== */}
-      <div className="flex items-center justify-between">
+      <div className="flex items-center justify-between min-w-0">
         <p className="text-[13px] text-muted-foreground">
           <span className="numeric font-medium text-foreground-strong">{total}</span> مستخدم
           {hasFilters && ' مطابق للفلترة'}
         </p>
       </div>
 
-      {/* ===== Table ===== */}
       <Card variant="primary">
-        <CardContent className="p-0">
+        <CardContent className="p-0 min-w-0">
           {users.length === 0 ? (
             <EmptyState
               icon={<UsersIcon />}
@@ -148,7 +151,7 @@ export default async function UsersPage({
             />
           ) : (
             <div className="overflow-x-auto">
-              <table className="w-full text-sm text-right">
+              <table className="w-full text-sm text-right min-w-[600px]">
                 <thead className="text-[12px] text-muted-foreground bg-surface-muted">
                   <tr>
                     <th className="px-4 py-3.5 font-medium">المستخدم</th>
@@ -166,7 +169,6 @@ export default async function UsersPage({
                     const lastActivity = u.activities[0]?.createdAt
                     return (
                       <tr key={u.id} className="hover:bg-surface-muted transition-smooth">
-                        {/* User cell */}
                         <td className="px-4 py-3.5">
                           <div className="flex items-center gap-3">
                             <Avatar name={u.name} size="sm" />
@@ -176,11 +178,9 @@ export default async function UsersPage({
                             </div>
                           </div>
                         </td>
-                        {/* Role */}
                         <td className="px-4 py-3.5">
                           <Badge variant={roleCfg.variant}>{roleCfg.label}</Badge>
                         </td>
-                        {/* School */}
                         <td className="px-4 py-3.5 hidden md:table-cell">
                           {u.school ? (
                             <Link href={`/schools/${u.school.id}`} className="text-secondary hover:underline transition-smooth truncate">
@@ -190,19 +190,15 @@ export default async function UsersPage({
                             <span className="text-muted-foreground">—</span>
                           )}
                         </td>
-                        {/* Branch */}
                         <td className="px-4 py-3.5 hidden lg:table-cell text-muted-foreground">
                           {u.branch?.name ?? '—'}
                         </td>
-                        {/* Status */}
                         <td className="px-4 py-3.5">
                           <StatusBadge status={u.status} />
                         </td>
-                        {/* Last activity */}
                         <td className="px-4 py-3.5 hidden lg:table-cell text-[13px] text-muted-foreground">
                           {lastActivity ? formatRelativeTime(lastActivity) : 'لا يوجد'}
                         </td>
-                        {/* Actions */}
                         <td className="px-4 py-3.5">
                           <div className="flex items-center gap-1 justify-end">
                             <Button variant="ghost" size="icon-sm" aria-label="عرض">
@@ -223,9 +219,8 @@ export default async function UsersPage({
         </CardContent>
       </Card>
 
-      {/* ===== Pagination ===== */}
       {totalPages > 1 && (
-        <div className="flex items-center justify-between">
+        <div className="flex items-center justify-between min-w-0">
           <p className="text-[13px] text-muted-foreground">
             صفحة <span className="numeric font-medium text-foreground-strong">{page}</span> من{' '}
             <span className="numeric font-medium text-foreground-strong">{totalPages}</span>

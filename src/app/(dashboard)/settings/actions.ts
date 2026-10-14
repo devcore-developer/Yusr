@@ -14,11 +14,26 @@ export async function updateProfile(formData: FormData) {
 
   if (!name || !email) throw new Error("الحقول مطلوبة")
 
+  // التحقق من عدم وجود بريد إلكتروني آخر بنفس العنوان لمنع التكرار
+  const existingUser = await prisma.user.findFirst({
+    where: {
+      email,
+      NOT: { id: user.id }
+    }
+  })
+
+  if (existingUser) {
+    throw new Error("البريد الإلكتروني مستخدم بالفعل من قبل حساب آخر")
+  }
+
+  // تحديث البيانات في قاعدة البيانات
   await prisma.user.update({
     where: { id: user.id },
     data: { name, email }
   })
 
+  // إجبار Next.js على تحديث الواجهة بالكامل (Header و Sidebar) ليعكس التغيير فوراً
+  revalidatePath("/", "layout")
   revalidatePath("/settings")
 }
 

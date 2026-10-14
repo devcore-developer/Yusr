@@ -40,9 +40,9 @@ async function calculateBranchPerformance(branchId: string) {
     const verified = a.evidenceResponses.length
     return {
       id: a.id,
-      assessorId: a.assessor.id,
-      assessorName: a.assessor.name,
-      assessorRole: a.assessor.role,
+      assessorId: a.assessor?.id ?? "unknown",
+      assessorName: a.assessor?.name ?? "غير محدد",
+      assessorRole: a.assessor?.role ?? "غير محدد",
       score: totalEvidence > 0 ? Math.round((verified / totalEvidence) * 100) : 0,
       verifiedCount: verified,
       totalEvidence
@@ -114,9 +114,9 @@ async function calculateSchoolPerformance(schoolId: string) {
     const verified = a.evidenceResponses.length
     return {
       id: a.id,
-      assessorId: a.assessor.id,
-      assessorName: a.assessor.name,
-      assessorRole: a.assessor.role,
+      assessorId: a.assessor?.id ?? "unknown",
+      assessorName: a.assessor?.name ?? "غير محدد",
+      assessorRole: a.assessor?.role ?? "غير محدد",
       score: totalEvidence > 0 ? Math.round((verified / totalEvidence) * 100) : 0,
       verifiedCount: verified,
       totalEvidence
@@ -202,9 +202,10 @@ export default async function ReportsPage({
           breadcrumbs={[{ label: 'الرئيسية', href: '/' }, { label: 'التقارير' }]}
         />
 
-        <Card className="overflow-hidden">
+        {/* Desktop Table Layout */}
+        <Card className="overflow-hidden hidden md:block">
           <CardContent className="p-0">
-            <table className="w-full text-sm text-right">
+            <table className="w-full text-sm text-right min-w-[800px]">
               <thead className="text-[12px] text-muted-foreground bg-surface-muted uppercase">
                 <tr>
                   <th className="px-6 py-4 font-medium">المدرسة</th>
@@ -221,9 +222,9 @@ export default async function ReportsPage({
                     <td className="px-6 py-4">
                       <div className="flex items-center gap-3">
                         {s.logoUrl ? (
-                          <Image src={s.logoUrl} alt={s.name} width={32} height={32} className="rounded-full" />
+                          <Image src={s.logoUrl} alt={s.name} width={32} height={32} className="rounded-full shrink-0" />
                         ) : (
-                          <div className="w-8 h-8 rounded-full bg-primary/10 flex items-center justify-center text-primary font-bold text-xs">{s.name.charAt(0)}</div>
+                          <div className="w-8 h-8 rounded-full bg-primary/10 flex items-center justify-center text-primary font-bold text-xs shrink-0">{s.name.charAt(0)}</div>
                         )}
                         <span className="font-medium text-foreground-strong">{s.name}</span>
                       </div>
@@ -256,6 +257,44 @@ export default async function ReportsPage({
             </table>
           </CardContent>
         </Card>
+
+        {/* Mobile Card Layout */}
+        <div className="grid grid-cols-1 gap-4 md:hidden min-w-0">
+          {schoolStats.map((s) => (
+            <Card key={s.id} className="p-4 min-w-0">
+              <div className="flex items-center gap-3 mb-3">
+                {s.logoUrl ? (
+                  <Image src={s.logoUrl} alt={s.name} width={40} height={40} className="rounded-full shrink-0" />
+                ) : (
+                  <div className="w-10 h-10 rounded-full bg-primary/10 flex items-center justify-center text-primary font-bold text-sm shrink-0">{s.name.charAt(0)}</div>
+                )}
+                <div className="min-w-0">
+                  <h3 className="font-bold text-foreground-strong truncate">{s.name}</h3>
+                  <p className="text-xs text-muted-foreground">{s._count.branches} فروع • {s.completed} تقييم مكتمل</p>
+                </div>
+              </div>
+              <div className="border-t pt-3">
+                <div className="flex justify-between items-center mb-2">
+                  <span className="text-xs text-muted-foreground">الأداء العام</span>
+                  <Badge variant={s.percentage === null ? "neutral" : s.percentage >= 90 ? "success" : s.percentage >= 75 ? "info" : s.percentage >= 50 ? "warning" : "danger"}>
+                    {s.band}
+                  </Badge>
+                </div>
+                {s.percentage !== null ? (
+                  <div className="flex items-center gap-2 mb-3">
+                    <Progress value={s.percentage} size="sm" className="w-full" tone={s.percentage === 100 ? "success" : "default"} />
+                    <span className="text-[12px] font-medium text-muted-foreground numeric">{s.percentage}%</span>
+                  </div>
+                ) : (
+                  <p className="text-[12px] text-muted-foreground mb-3">غير مقيم</p>
+                )}
+                <Link href={`/reports/print?scope=single&schoolId=${s.id}`} className="block">
+                  <Button variant="outline" size="sm" className="w-full">عرض التقرير</Button>
+                </Link>
+              </div>
+            </Card>
+          ))}
+        </div>
 
         <Card className="p-6">
           <h3 className="font-bold mb-4">تصدير تقرير شامل (جميع المدارس)</h3>
@@ -307,13 +346,13 @@ export default async function ReportsPage({
           )}
         </Card>
 
-        {/* Multi-Evaluator Breakdown */}
+        {/* Multi-Evaluator Breakdown - Desktop */}
         {perf.evaluators.length > 0 && (
-          <Card>
+          <Card className="hidden md:block">
             <CardContent className="p-6">
               <h3 className="font-bold mb-4">تقرير المقيمين الفردي</h3>
               <div className="overflow-x-auto">
-                <table className="w-full text-sm text-right">
+                <table className="w-full text-sm text-right min-w-[600px]">
                   <thead className="text-[12px] text-muted-foreground bg-surface-muted">
                     <tr>
                       <th className="px-4 py-3 font-medium">المقيّم</th>
@@ -355,19 +394,43 @@ export default async function ReportsPage({
           </Card>
         )}
 
+        {/* Multi-Evaluator Breakdown - Mobile */}
+        {perf.evaluators.length > 0 && (
+          <div className="grid grid-cols-1 gap-4 md:hidden min-w-0">
+            {perf.evaluators.map((ev: any) => (
+              <Card key={ev.id} className="p-4 min-w-0">
+                <div className="flex justify-between items-center mb-2">
+                  <span className="font-medium text-foreground-strong">{ev.name}</span>
+                  <Badge variant={ev.averageScore >= 90 ? "success" : ev.averageScore >= 75 ? "info" : ev.averageScore >= 50 ? "warning" : "danger"}>
+                    {getPerformanceBand(ev.averageScore)}
+                  </Badge>
+                </div>
+                <p className="text-xs text-muted-foreground mb-3">{ev.role} • {ev.assessmentCount} تقييمات</p>
+                <div className="flex items-center gap-2 mb-3">
+                  <Progress value={ev.averageScore} size="sm" className="w-full" tone={ev.averageScore === 100 ? "success" : "default"} />
+                  <span className="text-[12px] font-medium numeric">{ev.averageScore}%</span>
+                </div>
+                <Link href={`/reports/print?scope=evaluator&branchId=${branch.id}&evaluatorId=${ev.id}`}>
+                  <Button variant="outline" size="sm" className="w-full">تقرير فردي</Button>
+                </Link>
+              </Card>
+            ))}
+          </div>
+        )}
+
         {/* Individual Assessment Scores */}
         {perf.assessments.length > 0 && (
           <Card>
-            <CardContent className="p-6">
+            <CardContent className="p-6 min-w-0">
               <h3 className="font-bold mb-4">تفاصيل التقييمات المكتملة</h3>
               <div className="divide-y divide-border">
                 {perf.assessments.map((a: any) => (
-                  <div key={a.id} className="py-3 flex justify-between items-center">
-                    <div>
-                      <p className="font-medium text-foreground-strong">{a.assessorName}</p>
-                      <p className="text-xs text-muted-foreground">{a.assessorRole} • {a.verifiedCount}/{a.totalEvidence} شاهد متحقق</p>
+                  <div key={a.id} className="py-3 flex justify-between items-center gap-2">
+                    <div className="min-w-0">
+                      <p className="font-medium text-foreground-strong truncate">{a.assessorName}</p>
+                      <p className="text-xs text-muted-foreground truncate">{a.assessorRole} • {a.verifiedCount}/{a.totalEvidence} شاهد متحقق</p>
                     </div>
-                    <div className="flex items-center gap-3">
+                    <div className="flex items-center gap-3 shrink-0">
                       <Badge variant={a.score >= 90 ? "success" : a.score >= 75 ? "info" : a.score >= 50 ? "warning" : "danger"}>
                         {a.score}%
                       </Badge>
@@ -446,13 +509,13 @@ export default async function ReportsPage({
           )}
         </Card>
 
-        {/* Multi-Evaluator Breakdown */}
+        {/* Multi-Evaluator Breakdown - Desktop */}
         {perf.evaluators.length > 0 && (
-          <Card>
+          <Card className="hidden md:block">
             <CardContent className="p-6">
               <h3 className="font-bold mb-4">تقرير المقيمين</h3>
               <div className="overflow-x-auto">
-                <table className="w-full text-sm text-right">
+                <table className="w-full text-sm text-right min-w-[500px]">
                   <thead className="text-[12px] text-muted-foreground bg-surface-muted">
                     <tr>
                       <th className="px-4 py-3 font-medium">المقيّم</th>
@@ -488,17 +551,38 @@ export default async function ReportsPage({
           </Card>
         )}
 
+        {/* Multi-Evaluator Breakdown - Mobile */}
+        {perf.evaluators.length > 0 && (
+          <div className="grid grid-cols-1 gap-4 md:hidden min-w-0">
+            {perf.evaluators.map((ev: any) => (
+              <Card key={ev.id} className="p-4 min-w-0">
+                <div className="flex justify-between items-center mb-2">
+                  <span className="font-medium text-foreground-strong">{ev.name}</span>
+                  <Badge variant={ev.averageScore >= 90 ? "success" : ev.averageScore >= 75 ? "info" : ev.averageScore >= 50 ? "warning" : "danger"}>
+                    {getPerformanceBand(ev.averageScore)}
+                  </Badge>
+                </div>
+                <p className="text-xs text-muted-foreground mb-3">{ev.role} • {ev.assessmentCount} تقييمات</p>
+                <div className="flex items-center gap-2">
+                  <Progress value={ev.averageScore} size="sm" className="w-full" />
+                  <span className="text-[12px] font-medium numeric">{ev.averageScore}%</span>
+                </div>
+              </Card>
+            ))}
+          </div>
+        )}
+
         {/* Individual Assessment List */}
         {perf.assessments.length > 0 && (
           <Card>
-            <CardContent className="p-6">
+            <CardContent className="p-6 min-w-0">
               <h3 className="font-bold mb-4">سجل التقييمات المكتملة</h3>
               <div className="divide-y divide-border">
                 {perf.assessments.map((a: any) => (
-                  <div key={a.id} className="py-3 flex justify-between items-center">
-                    <div>
-                      <p className="font-medium text-foreground-strong">{a.assessorName}</p>
-                      <p className="text-xs text-muted-foreground">{a.assessorRole} • {a.verifiedCount}/{a.totalEvidence} شاهد</p>
+                  <div key={a.id} className="py-3 flex justify-between items-center gap-2">
+                    <div className="min-w-0">
+                      <p className="font-medium text-foreground-strong truncate">{a.assessorName}</p>
+                      <p className="text-xs text-muted-foreground truncate">{a.assessorRole} • {a.verifiedCount}/{a.totalEvidence} شاهد</p>
                     </div>
                     <Badge variant={a.score >= 90 ? "success" : a.score >= 75 ? "info" : a.score >= 50 ? "warning" : "danger"}>{a.score}%</Badge>
                   </div>
@@ -580,18 +664,18 @@ export default async function ReportsPage({
         </Card>
 
         <Card>
-          <CardContent className="p-6">
+          <CardContent className="p-6 min-w-0">
             <h3 className="font-bold mb-4">سجل تقييماتي</h3>
             <div className="divide-y divide-border">
               {assessmentScores.map(a => (
-                <div key={a.id} className="py-3 flex justify-between items-center">
-                  <div>
-                    <p className="font-medium text-foreground-strong">{a.school.name}</p>
-                    <p className="text-xs text-muted-foreground">
+                <div key={a.id} className="py-3 flex justify-between items-center gap-2">
+                  <div className="min-w-0">
+                    <p className="font-medium text-foreground-strong truncate">{a.school.name}</p>
+                    <p className="text-xs text-muted-foreground truncate">
                       {a.branch?.name || "كامل المدرسة"} • {a.verifiedCount}/{totalEvidence} شاهد • {a.status === "COMPLETED" ? "مكتمل" : "جاري"}
                     </p>
                   </div>
-                  <div className="flex items-center gap-3">
+                  <div className="flex items-center gap-3 shrink-0">
                     {a.status === "COMPLETED" ? (
                       <Badge variant={a.score >= 90 ? "success" : a.score >= 75 ? "info" : a.score >= 50 ? "warning" : "danger"}>{a.score}%</Badge>
                     ) : (

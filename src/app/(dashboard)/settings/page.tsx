@@ -7,8 +7,7 @@ import { Button } from "@/components/ui/Button"
 import { Input } from "@/components/ui/Input"
 import { Avatar } from "@/components/ui/Avatar"
 import { Badge } from "@/components/ui/Badge"
-import { updateProfile } from "./actions"
-import { SecurityForm } from "@/components/settings/SecurityForm"
+import { updateProfile, updatePassword } from "./actions"
 import { BackupSection } from "@/components/settings/BackupSection"
 import { User, Shield, Database } from "lucide-react"
 
@@ -20,6 +19,10 @@ export default async function SettingsPage() {
 
   const isAssessor = user.role === "QUALITY_ASSESSOR"
   const isSuperAdmin = user.role === "SUPER_ADMIN"
+
+  // جلب أحدث بيانات من قاعدة البيانات لضمان ربطها بشكل صحيح
+  const dbUser = await prisma.user.findUnique({ where: { id: user.id } })
+  if (!dbUser) redirect("/login")
 
   // جلب سجل النسخ الاحتياطي للسوبر أدمن فقط
   const backupHistory = isSuperAdmin 
@@ -44,20 +47,20 @@ export default async function SettingsPage() {
           <CardContent>
             <form action={updateProfile} className="grid grid-cols-1 md:grid-cols-2 gap-5">
               <div className="flex items-center gap-4 md:col-span-2">
-                <Avatar name={user.name ?? 'م'} size="lg" />
+                <Avatar name={dbUser.name ?? 'م'} size="lg" />
                 <div>
-                  <p className="font-semibold text-foreground-strong">{user.name}</p>
-                  <p className="text-[13px] text-muted-foreground">{user.email}</p>
+                  <p className="font-semibold text-foreground-strong">{dbUser.name}</p>
+                  <p className="text-[13px] text-muted-foreground">{dbUser.email}</p>
                   {isSuperAdmin && <Badge variant="danger" className="mt-1">مدير النظام</Badge>}
                 </div>
               </div>
               <div className="space-y-1.5">
                 <label className="text-[13px] font-medium text-foreground-strong">الاسم الكامل</label>
-                <Input name="name" defaultValue={user.name ?? ''} required />
+                <Input name="name" defaultValue={dbUser.name ?? ''} required />
               </div>
               <div className="space-y-1.5">
                 <label className="text-[13px] font-medium text-foreground-strong">البريد الإلكتروني</label>
-                <Input name="email" defaultValue={user.email ?? ''} type="email" required />
+                <Input name="email" defaultValue={dbUser.email ?? ''} type="email" required />
               </div>
               <div className="md:col-span-2 flex justify-end gap-2 pt-2">
                 <Button type="submit" variant="primary" size="md">حفظ التغييرات</Button>
@@ -74,7 +77,20 @@ export default async function SettingsPage() {
           <CardDescription>تغيير كلمة المرور وإدارة الوصول</CardDescription>
         </CardHeader>
         <CardContent>
-          <SecurityForm />
+          {/* نموذج تغيير كلمة المرور */}
+          <form action={updatePassword} className="grid grid-cols-1 md:grid-cols-2 gap-5 mb-6">
+            <div className="space-y-1.5">
+              <label className="text-[13px] font-medium text-foreground-strong">كلمة المرور الجديدة</label>
+              <Input name="newPassword" type="password" placeholder="******" required />
+            </div>
+            <div className="space-y-1.5">
+              <label className="text-[13px] font-medium text-foreground-strong">تأكيد كلمة المرور</label>
+              <Input name="confirmPassword" type="password" placeholder="******" required />
+            </div>
+            <div className="md:col-span-2 flex justify-end gap-2 pt-2">
+              <Button type="submit" variant="outline" size="md">تحديث كلمة المرور</Button>
+            </div>
+          </form>
           
           {/* قسم الأدوار يظهر للسوبر أدمن فقط */}
           {isSuperAdmin && (

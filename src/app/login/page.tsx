@@ -5,7 +5,7 @@ import { signIn } from "next-auth/react"
 import { useRouter } from "next/navigation"
 import { Button } from "@/components/ui/Button"
 import { Input } from "@/components/ui/Input"
-import { GraduationCap, Eye, EyeOff, AlertCircle, Loader2 } from "lucide-react"
+import { Eye, EyeOff, AlertCircle } from "lucide-react"
 
 export default function LoginPage() {
   const router = useRouter()
@@ -53,11 +53,14 @@ export default function LoginPage() {
       <div className="relative w-full max-w-[420px]">
         {/* Brand */}
         <div className="flex flex-col items-center mb-8">
-          <div className="bg-secondary p-3 rounded-2xl shadow-lg shadow-secondary/30 mb-4">
-            <GraduationCap className="w-8 h-8 text-white" strokeWidth={2.2} />
-          </div>
-          <h1 className="text-2xl font-bold text-white tracking-tight">YUSR</h1>
-          <p className="text-[13px] text-primary-100/60 mt-1">منصة إدارة الجودة التعليمية</p>
+          <img 
+            src="/logo.png" 
+            alt="منصة يُسر للتقويم المدرسي الداخلي" 
+            className="w-20 h-20 mb-4 object-contain drop-shadow-lg bg-white rounded-2xl p-2" 
+          />
+          <h1 className="text-2xl font-bold text-white tracking-tight">يُسر | YUSR</h1>
+          <p className="text-[13px] text-primary-100/80 mt-1">منصة يُسر للتقويم المدرسي الداخلي</p>
+          <p className="text-[11px] text-secondary font-semibold mt-1">نقيس • نحلل • نُحسّن</p>
         </div>
 
         {/* Card */}

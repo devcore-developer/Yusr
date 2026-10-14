@@ -4,18 +4,24 @@ import { redirect } from "next/navigation"
 import { PageHeader } from "@/components/layout/PageHeader"
 import { Card, CardContent } from "@/components/ui/Card"
 import { Badge } from "@/components/ui/Badge"
-import { SurveyForm } from "@/components/landing/SurveyForm"
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/Select"
+import { Input } from "@/components/ui/Input"
+import { Button } from "@/components/ui/Button"
+import { addSurvey } from "@/features/landing/actions"
 import { BarChart2 } from "lucide-react"
+
+async function handleAddSurvey(formData: FormData) {
+  "use server"
+  await addSurvey(formData)
+}
 
 export default async function SurveysPage() {
   const user = await getCurrentUser()
   if (!user) redirect("/login")
 
-  // جلب الاستبانات حسب الصلاحيات
   const where = user.role === "SUPER_ADMIN" ? {} : { schoolId: user.schoolId }
   const surveys = await prisma.survey.findMany({ where, orderBy: { createdAt: "desc" } })
 
-  // جلب نصوص الشواهد لاستخدامها في القائمة المنسدلة
   const evidenceRecords = await prisma.fixedEvidence.findMany({
     select: { text: true, tool: true },
     distinct: ['text'],
@@ -31,9 +37,67 @@ export default async function SurveysPage() {
       />
 
       <Card>
-        <CardContent className="p-6">
+        <CardContent className="p-6 min-w-0">
           <h3 className="text-base font-bold mb-4">إضافة نتيجة استبانة</h3>
-          <SurveyForm evidenceTexts={evidenceRecords} />
+          <form action={handleAddSurvey} className="space-y-4 min-w-0">
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              <div className="space-y-1.5">
+                <label className="text-[13px] font-medium text-foreground-strong">نوع الاستبانة</label>
+                <Select name="type">
+                  <SelectTrigger className="w-full">
+                    <SelectValue placeholder="اختر نوع الاستبانة" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="استبانة الطلاب">استبانة الطلاب</SelectItem>
+                    <SelectItem value="استبانة المعلمين">استبانة المعلمين</SelectItem>
+                    <SelectItem value="استبانة أولياء الأمور">استبانة أولياء الأمور</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              
+              <div className="space-y-1.5">
+                <label className="text-[13px] font-medium text-foreground-strong">النتيجة العامة للاستبانة</label>
+                <Select name="generalResult">
+                  <SelectTrigger className="w-full">
+                    <SelectValue placeholder="نتيجة عامة للاستبانة" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="نتيجة عامة للاستبانة">نتيجة عامة للاستبانة</SelectItem>
+                    {evidenceRecords.map((ev, i) => (
+                      <SelectItem key={i} value={ev.text}>
+                        {ev.text}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <div className="space-y-1.5">
+                <label className="text-[13px] font-medium text-foreground-strong">النسبة المئوية %</label>
+                <Input
+                  name="percentage"
+                  type="number"
+                  min="0"
+                  max="100"
+                  step="0.1"
+                  placeholder="النسبة المئوية %"
+                  required
+                />
+              </div>
+            </div>
+
+            <div className="space-y-1.5">
+              <label className="text-[13px] font-medium text-foreground-strong">ملاحظات</label>
+              <Input name="note" placeholder="مصدر النتيجة، عدد المستجيبين، الفترة، أو أي ملاحظة..." />
+            </div>
+
+            <div className="flex items-center gap-2">
+              <input type="checkbox" name="include" id="include" className="w-4 h-4" />
+              <label htmlFor="include" className="text-[13px] font-medium text-foreground-strong">تضمين النسبة في تجميع المؤشر عند ربطها بمؤشر</label>
+            </div>
+
+            <Button type="submit">إضافة النتيجة</Button>
+          </form>
         </CardContent>
       </Card>
 

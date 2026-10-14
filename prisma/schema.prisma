@@ -65,8 +65,8 @@ model User {
   updatedAt     DateTime   @updatedAt
   uploadedAttachments AssessmentAttachment[] @relation("UploadedAttachments")
 
-  school        School?    @relation(fields: [schoolId], references: [id])
-  branch        Branch?    @relation("BranchUsers", fields: [branchId], references: [id])
+  school        School?    @relation(fields: [schoolId], references: [id], onDelete: SetNull)
+  branch        Branch?    @relation("BranchUsers", fields: [branchId], references: [id], onDelete: SetNull)
   managedBranches Branch[] @relation("BranchManager")
   assessments   Assessment[]
   activities    Activity[]
@@ -136,7 +136,7 @@ model Branch {
   updatedAt     DateTime     @updatedAt
 
   school        School       @relation(fields: [schoolId], references: [id], onDelete: Cascade)
-  manager       User?        @relation("BranchManager", fields: [managerId], references: [id])
+  manager       User?        @relation("BranchManager", fields: [managerId], references: [id], onDelete: SetNull)
   users         User[]       @relation("BranchUsers")
   assessments   Assessment[]
   gaps          Gap[]
@@ -221,7 +221,7 @@ model Assessment {
   id            String           @id @default(cuid())
   schoolId      String
   branchId      String?
-  assessorId    String
+  assessorId    String?
   status        AssessmentStatus @default(NOT_STARTED)
   progress      Int              @default(0)
   score         Int              @default(0)
@@ -230,17 +230,17 @@ model Assessment {
   createdAt     DateTime         @default(now())
   updatedAt     DateTime         @updatedAt
   submittedAt   DateTime?
-  cycle         String?   @default("2024-2025") // دورة التقييم
-  school        School           @relation(fields: [schoolId], references: [id])
-  branch        Branch?          @relation(fields: [branchId], references: [id])
-  assessor      User             @relation(fields: [assessorId], references: [id])
+  cycle         String?   @default("2024-2025")
+  school        School           @relation(fields: [schoolId], references: [id], onDelete: Cascade)
+  branch        Branch?          @relation(fields: [branchId], references: [id], onDelete: SetNull)
+  assessor      User?            @relation(fields: [assessorId], references: [id], onDelete: SetNull)
   responses     AssessmentResponse[]
   evidenceResponses EvidenceResponse[]
   attachments   AssessmentAttachment[]
   gaps          Gap[]
   evidence      Evidence[]
   plans         ImprovementPlan[]
-  type          String   @default("NORMAL") // NORMAL أو PRIVATE_REVIEW
+  type          String   @default("NORMAL")
 
   @@index([assessorId])
   @@index([schoolId, branchId, status])
@@ -266,8 +266,8 @@ model EvidenceResponse {
   assessmentId  String
   evidenceId    String
   isVerified    Boolean    @default(false)
-  visitNumber   Int?       // 1-7 for observations
-  scoreValue    Int?       // 1-4 for special cases
+  visitNumber   Int?
+  scoreValue    Int?
   createdAt     DateTime   @default(now())
   updatedAt     DateTime   @updatedAt
 
@@ -289,9 +289,9 @@ model Gap {
   createdAt     DateTime   @default(now())
   updatedAt     DateTime   @updatedAt
 
-  school        School     @relation(fields: [schoolId], references: [id])
-  branch        Branch?    @relation(fields: [branchId], references: [id])
-  assessment    Assessment @relation(fields: [assessmentId], references: [id])
+  school        School     @relation(fields: [schoolId], references: [id], onDelete: Cascade)
+  branch        Branch?    @relation(fields: [branchId], references: [id], onDelete: SetNull)
+  assessment    Assessment @relation(fields: [assessmentId], references: [id], onDelete: Cascade)
   indicator     Indicator  @relation(fields: [indicatorId], references: [id])
   plans         ImprovementPlan[]
 
@@ -315,36 +315,35 @@ model ImprovementPlan {
   startDate     DateTime @default(now())
   targetDate    DateTime
   completedAt   DateTime?
-  createdById   String
+  createdById   String?
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt
 
-  // حقول التحليل و KPIs
-  baseline          Float?  // النسبة الحالية
-  targetPercentage  Float?  // النسبة المستهدفة
-  currentMeasured   Float?  // النسبة المقاسة حالياً
-  kpiName           String? // اسم مؤشر الأداء
-  successCriteria   String? // معايير النجاح
-  requiredSupport   String? // الدعم المطلوب
-  followUpMethod    String? // منهجية المتابعة
-  impactNotes       String? // ملاحظات قياس الأثر
+  baseline          Float?
+  targetPercentage  Float?
+  currentMeasured   Float?
+  kpiName           String?
+  successCriteria   String?
+  requiredSupport   String?
+  followUpMethod    String?
+  impactNotes       String?
   
-  // الأسباب ونقاط القوة
   reasons           String?
   strengths         String?
   improvements      String?
 
-  school        School   @relation(fields: [schoolId], references: [id])
-  branch        Branch?  @relation(fields: [branchId], references: [id])
-  assessment    Assessment? @relation(fields: [assessmentId], references: [id])
-  gap           Gap?     @relation(fields: [gapId], references: [id])
-  createdBy     User     @relation("CreatedPlans", fields: [createdById], references: [id])
+  school        School   @relation(fields: [schoolId], references: [id], onDelete: Cascade)
+  branch        Branch?  @relation(fields: [branchId], references: [id], onDelete: SetNull)
+  assessment    Assessment? @relation(fields: [assessmentId], references: [id], onDelete: SetNull)
+  gap           Gap?     @relation(fields: [gapId], references: [id], onDelete: SetNull)
+  createdBy     User?     @relation("CreatedPlans", fields: [createdById], references: [id], onDelete: SetNull)
   actions       ImprovementAction[]
   followUps     ImprovementFollowUp[]
 
   @@index([schoolId])
   @@index([gapId])
 }
+
 model ImprovementAction {
   id                String   @id @default(cuid())
   planId            String
@@ -361,7 +360,7 @@ model ImprovementAction {
   updatedAt         DateTime @updatedAt
 
   plan              ImprovementPlan @relation(fields: [planId], references: [id], onDelete: Cascade)
-  responsible       User?    @relation("AssignedActions", fields: [responsibleUserId], references: [id])
+  responsible       User?    @relation("AssignedActions", fields: [responsibleUserId], references: [id], onDelete: SetNull)
   followUps         ImprovementFollowUp[]
 
   @@index([planId])
@@ -371,21 +370,21 @@ model ImprovementFollowUp {
   id            String   @id @default(cuid())
   planId        String
   actionId      String?
-  createdById   String
+  createdById   String?
   note          String
   progress      Int?
   createdAt     DateTime @default(now())
 
   plan          ImprovementPlan @relation(fields: [planId], references: [id], onDelete: Cascade)
-  action        ImprovementAction? @relation(fields: [actionId], references: [id])
-  createdBy     User     @relation("CreatedFollowUps", fields: [createdById], references: [id])
+  action        ImprovementAction? @relation(fields: [actionId], references: [id], onDelete: Cascade)
+  createdBy     User?     @relation("CreatedFollowUps", fields: [createdById], references: [id], onDelete: SetNull)
 
   @@index([planId])
 }
 
 model Activity {
   id            String     @id @default(cuid())
-  actorId       String
+  actorId       String?
   schoolId      String?
   branchId      String?
   action        String
@@ -394,9 +393,9 @@ model Activity {
   metadata      Json?
   createdAt     DateTime   @default(now())
 
-  actor         User       @relation(fields: [actorId], references: [id])
-  school        School?    @relation(fields: [schoolId], references: [id])
-  branch        Branch?    @relation(fields: [branchId], references: [id])
+  actor         User?      @relation(fields: [actorId], references: [id], onDelete: SetNull)
+  school        School?    @relation(fields: [schoolId], references: [id], onDelete: SetNull)
+  branch        Branch?    @relation(fields: [branchId], references: [id], onDelete: SetNull)
 
   @@index([schoolId])
   @@index([actorId])
@@ -406,14 +405,14 @@ model Activity {
 model Evidence {
   id            String     @id @default(cuid())
   assessmentId  String
-  uploadedById  String
+  uploadedById  String?
   type          String     
   name          String
   url           String
   createdAt     DateTime   @default(now())
 
-  assessment    Assessment @relation(fields: [assessmentId], references: [id])
-  uploader      User       @relation("UploadedEvidence", fields: [uploadedById], references: [id])
+  assessment    Assessment @relation(fields: [assessmentId], references: [id], onDelete: Cascade)
+  uploader      User?       @relation("UploadedEvidence", fields: [uploadedById], references: [id], onDelete: SetNull)
   
   @@index([assessmentId])
 }
@@ -441,13 +440,13 @@ model Survey {
   generalResult String?
   createdAt     DateTime @default(now())
 
-  school        School?  @relation(fields: [schoolId], references: [id])
+  school        School?  @relation(fields: [schoolId], references: [id], onDelete: SetNull)
 }
 
 model BackupHistory {
   id        String   @id @default(cuid())
-  type      String   // "Manual Export"
-  status    String   // "SUCCESS" | "FAILED"
+  type      String
+  status    String
   fileSize  Int?
   createdAt DateTime @default(now())
 }
@@ -480,15 +479,15 @@ model AssessmentAttachment {
   id            String   @id @default(cuid())
   assessmentId  String
   evidenceId    String
-  uploadedById  String
+  uploadedById  String?
   fileName      String
   fileType      String
   fileSize      Int
-  fileData      String   // Base64 encoded string for immediate Vercel compatibility
+  fileData      String
   createdAt     DateTime @default(now())
 
   assessment    Assessment @relation(fields: [assessmentId], references: [id], onDelete: Cascade)
-  uploader      User       @relation("UploadedAttachments", fields: [uploadedById], references: [id])
+  uploader      User?       @relation("UploadedAttachments", fields: [uploadedById], references: [id], onDelete: SetNull)
   
   @@index([assessmentId])
   @@index([evidenceId])

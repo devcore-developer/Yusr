@@ -13,15 +13,15 @@ const almarai = Almarai({
 })
 
 export const metadata: Metadata = {
-  title: { default: "يسر | منصة إدارة الجودة التعليمية", template: "%s | يسر" },
-  description: "منصة مؤسسية متكاملة لإدارة جودة المدارس والتقييمات وخطط التحسين",
+  title: { default: "يُسر | YUSR - منصة التقويم المدرسي الداخلي", template: "%s | يُسر" },
+  description: "منصة يُسر للتقويم المدرسي الداخلي - نقيس • نحلل • نُحسّن",
   icons: {
     icon: '/favicon.png',
     apple: '/logo.png',
   },
   openGraph: {
-    title: "يسر | منصة إدارة الجودة التعليمية",
-    description: "منصة مؤسسية متكاملة لإدارة جودة المدارس والتقييمات وخطط التحسين",
+    title: "يُسر | YUSR - منصة التقويم المدرسي الداخلي",
+    description: "منصة يُسر للتقويم المدرسي الداخلي - نقيس • نحلل • نُحسّن",
     url: "https://yusr-platform.com",
     siteName: "YUSR",
     images: [
@@ -29,7 +29,7 @@ export const metadata: Metadata = {
         url: '/og-image.png',
         width: 1200,
         height: 630,
-        alt: 'منصة يسر لإدارة الجودة',
+        alt: 'منصة يُسر للتقويم المدرسي الداخلي',
       }
     ],
     locale: 'ar_SA',
@@ -37,8 +37,8 @@ export const metadata: Metadata = {
   },
   twitter: {
     card: 'summary_large_image',
-    title: "يسر | منصة إدارة الجودة التعليمية",
-    description: "منصة مؤسسية متكاملة لإدارة جودة المدارس والتقييمات وخطط التحسين",
+    title: "يُسر | YUSR - منصة التقويم المدرسي الداخلي",
+    description: "منصة يُسر للتقويم المدرسي الداخلي - نقيس • نحلل • نُحسّن",
     images: ['/og-image.png'],
   },
 }

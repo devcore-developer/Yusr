@@ -96,8 +96,8 @@ export function Sidebar({ role, user }: SidebarProps) {
             <Image src="/logo.png" alt="YUSR Logo" fill className="object-contain rounded-lg" priority />
           </div>
           <div className="flex flex-col leading-none">
-            <span className="text-lg font-bold tracking-tight text-white">يُــــسر</span>
-            <span className="text-[10px] text-cyan-300/70 mt-0.5">إدارة الجودة</span>
+            <span className="text-lg font-bold tracking-tight text-white">يُـــسر | YUSR</span>
+            <span className="text-[10px] text-cyan-300/70 mt-0.5">للتقويم المدرسي الداخلي</span>
           </div>
         </div>
       </div>

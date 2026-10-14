@@ -1,56 +1,38 @@
 "use server"
 
-import { GoogleGenerativeAI } from "@google/generative-ai"
 import { getDashboardContext } from "./services/context"
+import { getAIProvider } from "./services/provider"
+import { classifyIntent, handleDeterministicIntent } from "./services/router"
+import { getCurrentUser } from "@/lib/permissions"
 
-const SYSTEM_PROMPT = `You are the YUSR Quality Assistant, an AI integrated into a professional school quality management platform.
-Your role is to analyze quality assessment data, gaps, and improvement plans.
-Rules:
-1. Communicate exclusively in professional Modern Standard Arabic.
-2. NEVER invent official quality scores, accreditation percentages, or weights. Use only the provided metrics.
-3. Distinguish clearly between "Platform Data" (facts), "AI Analysis", and "AI Recommendations".
-4. Use neutral terminology (e.g., "مؤشرات لم يثبت تحققها" instead of "فشل").
-5. If data is insufficient, explicitly state that.
-Format your response cleanly using Markdown.`
+const SYSTEM_PROMPT = `You are the YUSR Quality Assistant. 
+Answer concisely and naturally in Egyptian/Standard Arabic. 
+Do not use rigid headers like "AI Analysis" unless explicitly asked.
+If data is provided in the context, use it strictly. Do not invent data.`
 
 export async function generateAIResponse(userMessage: string) {
-  const apiKey = process.env.GEMINI_API_KEY
+  const user = await getCurrentUser()
+  if (!user) return "يجب تسجيل الدخول لاستخدام المساعد."
 
-  // التحقق من وجود المفتاح وصحته (مفاتيح جوجل تبدأ بـ AIza)
-  if (!apiKey || !apiKey.startsWith("AIza")) {
-    return `**تنبيه:** المساعد الذكي لا يعمل حالياً لعدم وجود مفتاح API صالح.
-يرجى التأكد من إضافة مفتاح Google Gemini الصحيح (والذي يبدأ بـ AIza) في ملف .env`
+  // 1. تصنيف السؤال والتحقق مما إذا كان يمكن الرد عليه حتمياً (استعلام مباشر)
+  const intent = classifyIntent(userMessage)
+  const deterministicResult = await handleDeterministicIntent(intent, user)
+
+  // 2. إذا كان هناك رد حتمي (مثل عدد المدارس)، أرجعه فوراً دون استدعاء الـ AI
+  if (deterministicResult.response) {
+    return deterministicResult.response
   }
 
+  // 3. للأسئلة العامة، اجلب السياق ومرره للـ AI
   const context = await getDashboardContext()
-
-  if (!context) {
-    return "لا توجد بيانات كافية أو لا تمتلك الصلاحيات للقيام بهذا التحليل."
-  }
-
+  const provider = getAIProvider()
+  const systemContext = `${SYSTEM_PROMPT}\n\n--- بيانات السياق ---\n${JSON.stringify(context, null, 2)}`
+  
   try {
-    // تهيئة عميل Google Gemini
-    const genAI = new GoogleGenerativeAI(apiKey)
-    const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" }) // نموذج سريع ومجاني
-
-    // دمج التعليمات والبيانات والسؤال في رسالة واحدة
-    const prompt = `
- ${SYSTEM_PROMPT}
-
---- بيانات السياق المعتمدة (Context Data) ---
- ${JSON.stringify(context, null, 2)}
-
---- سؤال المستخدم ---
- ${userMessage}
-`
-
-    const result = await model.generateContent(prompt)
-    const response = await result.response
-    const text = response.text()
-
-    return text || "لم أتمكن من إنشاء رد."
+    const response = await provider.generateResponse(userMessage, systemContext)
+    return response || "لم أتمكن من إنشاء رد."
   } catch (error) {
-    console.error("Google Gemini API Error:", error)
-    return "تعذر تشغيل المساعد الذكي حاليًا بسبب خطأ في الاتصال بخادم Google. تأكد من صلاحية المفتاح واتصال الإنترنت."
+    console.error("AI Provider Error:", error)
+    return "تعذر تشغيل المساعد الذكي حاليًا. يرجى المحاولة مرة أخرى لاحقاً."
   }
 }

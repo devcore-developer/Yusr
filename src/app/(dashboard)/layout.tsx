@@ -22,7 +22,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
     <SuperAdminProvider>
       <AppShell 
         role={user?.role || "GUEST"} 
-        title="منصة يسر لإدارة الجودة" 
+        title="منصة يُسر للتقويم المدرسي الداخلي" 
         user={user ? { name: user.name!, email: user.email!, image: (user as any).image } : undefined}
         schoolContext={schoolContext}
       >
