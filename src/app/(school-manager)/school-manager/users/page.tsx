@@ -1,45 +1,42 @@
 import { prisma } from "@/lib/prisma"
 import { getCurrentUser } from "@/lib/permissions"
+import { redirect } from "next/navigation"
 import { PageHeader } from "@/components/layout/PageHeader"
 import { Card, CardContent } from "@/components/ui/Card"
 import { Button } from "@/components/ui/Button"
-import { Badge, StatusBadge } from "@/components/ui/Badge"
 import { Avatar } from "@/components/ui/Avatar"
+import { Badge, StatusBadge } from "@/components/ui/Badge"
 import { Input } from "@/components/ui/Input"
-import { Select } from "@/components/ui/Select"
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/Select"
 import { EmptyState } from "@/components/ui/EmptyState"
-import { Users as UsersIcon, Search, Plus, UserPlus, FilterX, Eye } from "lucide-react"
+import { ChevronLeft, ChevronRight, Search, Users as UsersIcon, Eye } from "lucide-react"
 import Link from "next/link"
 import { formatRelativeTime } from "@/lib/utils"
 
 export const metadata = { title: "المستخدمون" }
 
-const roleConfig: Record<string, { label: string; variant: 'info' | 'violet' | 'amber' | 'neutral' }> = {
+const roleConfig: Record<string, { label: string; variant: 'danger' | 'info' | 'violet' | 'amber' | 'neutral' }> = {
+  SUPER_ADMIN: { label: 'مدير النظام', variant: 'danger' },
   SCHOOL_MANAGER: { label: 'مدير مدرسة', variant: 'info' },
   BRANCH_MANAGER: { label: 'مدير فرع', variant: 'violet' },
   QUALITY_ASSESSOR: { label: 'مقيم جودة', variant: 'amber' },
 }
 
-export default async function SchoolUsersPage({
+export default async function UsersPage({
   searchParams,
 }: {
   searchParams: { [key: string]: string | string[] | undefined }
 }) {
   const user = await getCurrentUser()
-  if (!user?.schoolId) return null
+  if (!user || !user.schoolId) redirect("/login")
 
   const q = typeof searchParams.q === 'string' ? searchParams.q : undefined
   const role = typeof searchParams.role === 'string' ? searchParams.role : undefined
   const status = typeof searchParams.status === 'string' ? searchParams.status : undefined
+  const page = parseInt(typeof searchParams.page === 'string' ? searchParams.page : '1') || 1
+  const pageSize = 10
 
-  // تقييد الاستعلام: مدير الفرع يرى مستخدمي فرعه فقط
-  const where: Record<string, unknown> = {}
-  if (user.role === "BRANCH_MANAGER") {
-    where.branchId = user.branchId
-  } else {
-    where.schoolId = user.schoolId
-  }
-
+  const where: Record<string, unknown> = { schoolId: user.schoolId }
   if (q) {
     where.OR = [
       { name: { contains: q, mode: 'insensitive' } },
@@ -53,84 +50,77 @@ export default async function SchoolUsersPage({
     prisma.user.findMany({
       where,
       select: {
-        id: true, name: true, email: true, role: true, status: true,
-        branch: { select: { name: true } },
+        id: true,
+        name: true,
+        email: true,
+        role: true,
+        status: true,
+        createdAt: true,
+        branch: { select: { id: true, name: true } },
         activities: { take: 1, orderBy: { createdAt: 'desc' }, select: { createdAt: true } },
       },
+      skip: (page - 1) * pageSize,
+      take: pageSize,
       orderBy: { createdAt: 'desc' },
     }),
     prisma.user.count({ where }),
   ])
 
+  const totalPages = Math.max(1, Math.ceil(total / pageSize))
   const hasFilters = !!(q || role || status)
-  const isBranchManager = user.role === "BRANCH_MANAGER"
+
+  const buildPageUrl = (p: number) => {
+    const params = new URLSearchParams()
+    if (q) params.set('q', q)
+    if (role) params.set('role', role)
+    if (status) params.set('status', status)
+    params.set('page', String(p))
+    return `/school-manager/users?${params.toString()}`
+  }
 
   return (
     <div className="space-y-6">
       <PageHeader
         title="المستخدمون"
-        description={isBranchManager ? "إدارة مقيمي الجودة التابعين لفرعك." : "إدارة مستخدمي المدرسة — المديرين والمعلمين والمقيّمين."}
-        breadcrumbs={[
-          { label: 'الرئيسية', href: '/school-manager' },
-          { label: 'المستخدمون' },
-        ]}
-        actions={
-          <Link href="/school-manager/users/add">
-            <Button variant="primary" size="md" icon={<UserPlus className="w-4 h-4" />}>
-              {isBranchManager ? "إضافة مقيم جودة" : "إضافة مستخدم"}
-            </Button>
-          </Link>
-        }
+        description="إدارة مستخدمي مدرستك."
+        breadcrumbs={[{ label: 'الرئيسية', href: '/school-manager' }, { label: 'المستخدمون' }]}
       />
 
-      {/* Filter bar */}
-      <form className="flex flex-wrap items-center gap-3 p-4 bg-surface border border-border rounded-lg">
-        <div className="relative flex-1 min-w-[200px]">
+      <form className="flex flex-wrap items-center gap-3 p-4 bg-surface border border-border rounded-lg min-w-0">
+        <div className="relative flex-1 min-w-[200px] min-w-0">
           <Search className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground pointer-events-none" />
           <Input name="q" defaultValue={q} placeholder="ابحث بالاسم أو البريد..." className="pr-10" />
         </div>
-        <Select name="role" defaultValue={role} className="w-auto min-w-[130px]">
-          <option value="">كل الأدوار</option>
-          {!isBranchManager && <option value="SCHOOL_MANAGER">مدير مدرسة</option>}
-          {!isBranchManager && <option value="BRANCH_MANAGER">مدير فرع</option>}
-          <option value="QUALITY_ASSESSOR">مقيم جودة</option>
+        <Select name="role" defaultValue={role}>
+          <SelectTrigger className="w-full sm:w-auto sm:min-w-[140px]">
+            <SelectValue placeholder="كل الأدوار" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="SCHOOL_MANAGER">مدير مدرسة</SelectItem>
+            <SelectItem value="BRANCH_MANAGER">مدير فرع</SelectItem>
+            <SelectItem value="QUALITY_ASSESSOR">مقيم جودة</SelectItem>
+          </SelectContent>
         </Select>
-        <Select name="status" defaultValue={status} className="w-auto min-w-[110px]">
-          <option value="">كل الحالات</option>
-          <option value="ACTIVE">نشط</option>
-          <option value="INVITED">مدعو</option>
-          <option value="SUSPENDED">موقوف</option>
+        <Select name="status" defaultValue={status}>
+          <SelectTrigger className="w-full sm:w-auto sm:min-w-[120px]">
+            <SelectValue placeholder="كل الحالات" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="ACTIVE">نشط</SelectItem>
+            <SelectItem value="INVITED">مدعو</SelectItem>
+            <SelectItem value="SUSPENDED">موقوف</SelectItem>
+          </SelectContent>
         </Select>
         <Button type="submit" variant="primary" size="md" icon={<Search className="w-4 h-4" />}>تصفية</Button>
-        {hasFilters && (
-          <Link href="/school-manager/users">
-            <Button type="button" variant="ghost" size="md" icon={<FilterX className="w-4 h-4" />}>إلغاء</Button>
-          </Link>
-        )}
       </form>
 
-      <p className="text-[13px] text-muted-foreground">
-        <span className="numeric font-medium text-foreground-strong">{total}</span> مستخدم
-        {hasFilters && ' مطابق للفلترة'}
-      </p>
-
-      {/* Table */}
       <Card variant="primary">
-        <CardContent className="p-0">
+        <CardContent className="p-0 min-w-0">
           {users.length === 0 ? (
-            <EmptyState
-              icon={<UsersIcon />}
-              title={hasFilters ? 'لا توجد نتائج' : 'لا يوجد مستخدمون'}
-              description={hasFilters ? 'لم نجد مستخدمين مطابقين.' : 'لم يتم تسجيل أي مستخدم بعد.'}
-              compact
-              action={!hasFilters ? { 
-                label: isBranchManager ? 'إضافة مقيم جودة' : 'إضافة مستخدم', 
-                href: '/school-manager/users/add' 
-              } : undefined}
-            />
+            <EmptyState icon={<UsersIcon />} title="لا يوجد مستخدمون" description="لم يتم تسجيل أي مستخدمين بعد." compact />
           ) : (
             <div className="overflow-x-auto">
-              <table className="w-full text-sm text-right">
+              <table className="w-full text-sm text-right min-w-[600px]">
                 <thead className="text-[12px] text-muted-foreground bg-surface-muted">
                   <tr>
                     <th className="px-4 py-3.5 font-medium">المستخدم</th>
@@ -156,19 +146,23 @@ export default async function SchoolUsersPage({
                             </div>
                           </div>
                         </td>
-                        <td className="px-4 py-3.5"><Badge variant={roleCfg.variant}>{roleCfg.label}</Badge></td>
-                        <td className="px-4 py-3.5 hidden md:table-cell text-muted-foreground">
-                          {u.branch?.name ?? 'كامل المدرسة'}
+                        <td className="px-4 py-3.5">
+                          <Badge variant={roleCfg.variant}>{roleCfg.label}</Badge>
                         </td>
-                        <td className="px-4 py-3.5"><StatusBadge status={u.status} /></td>
+                        <td className="px-4 py-3.5 hidden md:table-cell text-muted-foreground">
+                          {u.branch?.name ?? '—'}
+                        </td>
+                        <td className="px-4 py-3.5">
+                          <StatusBadge status={u.status} />
+                        </td>
                         <td className="px-4 py-3.5 hidden lg:table-cell text-[13px] text-muted-foreground">
                           {lastActivity ? formatRelativeTime(lastActivity) : 'لا يوجد'}
                         </td>
                         <td className="px-4 py-3.5">
                           <div className="flex items-center gap-1 justify-end">
-                            <Link href={`/school-manager/users/${u.id}`}>
-                              <Button variant="ghost" size="icon-sm" aria-label="عرض" icon={<Eye className="w-4 h-4" />} />
-                            </Link>
+                            <Button variant="ghost" size="icon-sm" aria-label="عرض">
+                              <Eye className="w-4 h-4" />
+                            </Button>
                           </div>
                         </td>
                       </tr>
@@ -180,6 +174,27 @@ export default async function SchoolUsersPage({
           )}
         </CardContent>
       </Card>
+
+      {totalPages > 1 && (
+        <div className="flex items-center justify-between min-w-0">
+          <p className="text-[13px] text-muted-foreground">
+            صفحة <span className="numeric font-medium text-foreground-strong">{page}</span> من{' '}
+            <span className="numeric font-medium text-foreground-strong">{totalPages}</span>
+          </p>
+          <div className="flex gap-2">
+            {page > 1 && (
+              <Link href={buildPageUrl(page - 1)}>
+                <Button variant="outline" size="md" icon={<ChevronRight className="w-4 h-4" />}>السابق</Button>
+              </Link>
+            )}
+            {page < totalPages && (
+              <Link href={buildPageUrl(page + 1)}>
+                <Button variant="outline" size="md" iconPosition="end" icon={<ChevronLeft className="w-4 h-4" />}>التالي</Button>
+              </Link>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   )
 }

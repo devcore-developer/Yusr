@@ -52,7 +52,6 @@ export async function compareAssessments(assessmentIds: string[]) {
     throw new Error("يجب اختيار تقييمين على الأقل للمقارنة")
   }
 
-  // Get all official indicators
   const domains = await prisma.domain.findMany({
     include: {
       indicators: {
@@ -71,7 +70,6 @@ export async function compareAssessments(assessmentIds: string[]) {
     }))
   )
 
-  // Build comparison matrix
   const comparisons: ComparisonResult[] = allIndicators.map(indicator => {
     const responses: Record<string, { value: string; notes?: string | null } | undefined> = {}
     let allEvaluated = true
@@ -91,7 +89,7 @@ export async function compareAssessments(assessmentIds: string[]) {
         ? `${verifiedCount}/${indicator.requiredEvidence} متحقق`
         : "لم يُقيّم"
 
-      responses[assessment.assessor.id] = {
+      responses[assessment.assessor?.id ?? "unknown"] = {
         value: status,
         notes: response?.notes
       }
@@ -117,19 +115,17 @@ export async function compareAssessments(assessmentIds: string[]) {
     }
   })
 
-  // Calculate aggregated results
   const totalIndicators = comparisons.length
   const evaluatedIndicators = comparisons.filter(c => c.evaluatedByAll).length
   const agreedIndicators = comparisons.filter(c => c.agreement).length
   const disagreedIndicators = evaluatedIndicators - agreedIndicators
 
-  // Calculate average scores per assessment
   const assessmentScores = await Promise.all(
     assessments.map(async (a) => {
       const totalEvidence = await prisma.fixedEvidence.count()
       const verifiedEvidence = a.evidenceResponses.length
       const score = totalEvidence > 0 ? Math.round((verifiedEvidence / totalEvidence) * 100) : 0
-      return { assessorId: a.assessor.id, assessorName: a.assessor.name, score }
+      return { assessorId: a.assessor?.id ?? "unknown", assessorName: a.assessor?.name ?? "غير محدد", score }
     })
   )
 
@@ -137,7 +133,6 @@ export async function compareAssessments(assessmentIds: string[]) {
     ? Math.round(assessmentScores.reduce((acc, s) => acc + s.score, 0) / assessmentScores.length)
     : 0
 
-  // Domain averages
   const domainAverages = domains.map(d => {
     const domainIndicators = comparisons.filter(c => c.domain === d.name && c.evaluatedByAll)
     const domainAgreed = domainIndicators.filter(c => c.agreement).length
@@ -169,8 +164,8 @@ export async function compareAssessments(assessmentIds: string[]) {
   return {
     assessments: assessments.map(a => ({
       id: a.id,
-      assessorName: a.assessor.name,
-      assessorRole: a.assessor.role,
+      assessorName: a.assessor?.name ?? "غير محدد",
+      assessorRole: a.assessor?.role ?? "غير محدد",
       schoolName: a.school?.name || "",
       branchName: a.branch?.name || "",
       status: a.status,

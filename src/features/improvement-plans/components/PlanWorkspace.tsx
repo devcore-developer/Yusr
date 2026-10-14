@@ -3,7 +3,7 @@
 import { useState } from "react"
 import { Button } from "@/components/ui/Button"
 import { Input } from "@/components/ui/Input"
-import { Select } from "@/components/ui/Select"
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/Select"
 import { Badge } from "@/components/ui/Badge"
 import { addAction, updateActionProgress, addFollowUp } from "../actions"
 import { Loader2, PlusCircle, CheckCircle, XCircle, Clock, AlertCircle, Save } from "lucide-react"
@@ -56,9 +56,6 @@ export function PlanWorkspace({ plan }: PlanWorkspaceProps) {
     } else {
       // جارية أو متعثرة
       if (currentProgress === 100) newProgress = 99; // لا يمكن أن تبقى 100%
-      if (currentProgress === 0 && newStatus === "IN_PROGRESS") {
-        // السماح ببقائها 0 أو يمكن تركها للمستخدم، سنبقيها 0
-      }
     }
 
     setActionChanges(prev => ({
@@ -165,14 +162,18 @@ export function PlanWorkspace({ plan }: PlanWorkspaceProps) {
 
                     <Select 
                       value={currentStatus}
-                      onChange={(e) => handleStatusChange(action.id, e.target.value, currentProgress)}
-                      className="h-8 text-xs w-32"
+                      onValueChange={(val: string) => handleStatusChange(action.id, val, currentProgress)}
                       disabled={isSaving}
                     >
-                      <option value="PENDING">لم تبدأ</option>
-                      <option value="IN_PROGRESS">جارية</option>
-                      <option value="COMPLETED">مكتملة</option>
-                      <option value="DELAYED">متعثرة</option>
+                      <SelectTrigger className="h-8 text-xs w-32">
+                        <SelectValue placeholder="الحالة" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="PENDING">لم تبدأ</SelectItem>
+                        <SelectItem value="IN_PROGRESS">جارية</SelectItem>
+                        <SelectItem value="COMPLETED">مكتملة</SelectItem>
+                        <SelectItem value="DELAYED">متعثرة</SelectItem>
+                      </SelectContent>
                     </Select>
 
                     <div className="w-4 h-4 flex items-center justify-center">

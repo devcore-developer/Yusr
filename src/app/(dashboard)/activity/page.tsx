@@ -5,7 +5,7 @@ import { Card, CardContent } from "@/components/ui/Card"
 import { EmptyState } from "@/components/ui/EmptyState"
 import { Button } from "@/components/ui/Button"
 import { Input } from "@/components/ui/Input"
-import { Select } from "@/components/ui/Select"
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/Select"
 import { Avatar } from "@/components/ui/Avatar"
 import {
   Activity as ActivityIcon, Search, Building2, ClipboardList, FileText,
@@ -97,20 +97,24 @@ export default async function ActivityPage({
       />
 
       {/* Filter bar */}
-      <form className="flex flex-wrap items-center gap-3 p-4 bg-surface border border-border rounded-lg">
-        <div className="relative flex-1 min-w-[200px]">
+      <form className="flex flex-wrap items-center gap-3 p-4 bg-surface border border-border rounded-lg min-w-0">
+        <div className="relative flex-1 min-w-[200px] min-w-0">
           <Search className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground pointer-events-none" />
           <Input name="q" defaultValue={q} placeholder="ابحث في النشاطات..." className="pr-10" />
         </div>
-        <Select name="entityType" defaultValue={entityType} className="w-auto min-w-[140px]">
-          <option value="">كل الأنواع</option>
-          <option value="SCHOOL">مدارس</option>
-          <option value="ASSESSMENT">تقييمات</option>
-          <option value="USER">مستخدمون</option>
-          <option value="BRANCH">فروع</option>
-          <option value="SUBSCRIPTION">اشتراكات</option>
-          <option value="GAP">فجوات</option>
-          <option value="IMPROVEMENT_PLAN">خطط تحسين</option>
+        <Select name="entityType" defaultValue={entityType}>
+          <SelectTrigger className="w-full sm:w-auto sm:min-w-[140px]">
+            <SelectValue placeholder="كل الأنواع" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="SCHOOL">مدارس</SelectItem>
+            <SelectItem value="ASSESSMENT">تقييمات</SelectItem>
+            <SelectItem value="USER">مستخدمون</SelectItem>
+            <SelectItem value="BRANCH">فروع</SelectItem>
+            <SelectItem value="SUBSCRIPTION">اشتراكات</SelectItem>
+            <SelectItem value="GAP">فجوات</SelectItem>
+            <SelectItem value="IMPROVEMENT_PLAN">خطط تحسين</SelectItem>
+          </SelectContent>
         </Select>
         <Button type="submit" variant="primary" size="md" icon={<Search className="w-4 h-4" />}>تصفية</Button>
         {hasFilters && (
@@ -120,7 +124,7 @@ export default async function ActivityPage({
         )}
       </form>
 
-      <p className="text-[13px] text-muted-foreground">
+      <p className="text-[13px] text-muted-foreground min-w-0">
         <span className="numeric font-medium text-foreground-strong">{total}</span> نشاط
         {hasFilters && ' مطابق للفلترة'}
       </p>
@@ -174,7 +178,7 @@ export default async function ActivityPage({
 
       {/* Pagination */}
       {totalPages > 1 && (
-        <div className="flex items-center justify-between">
+        <div className="flex items-center justify-between min-w-0">
           <p className="text-[13px] text-muted-foreground">
             صفحة <span className="numeric font-medium text-foreground-strong">{page}</span> من{' '}
             <span className="numeric font-medium text-foreground-strong">{totalPages}</span>

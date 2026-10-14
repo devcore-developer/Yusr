@@ -33,7 +33,7 @@ export default async function AssessmentsPage() {
             <EmptyState icon={<ClipboardCheck />} title="لا توجد تقييمات" description="لم يتم تنفيذ أي تقييم بعد." compact />
           ) : (
             <div className="overflow-x-auto">
-              <table className="w-full text-sm text-right">
+              <table className="w-full text-sm text-right min-w-[600px]">
                 <thead className="text-[12px] text-muted-foreground bg-surface-muted">
                   <tr>
                     <th className="px-4 py-3.5 font-medium">الفرع</th>
@@ -49,7 +49,7 @@ export default async function AssessmentsPage() {
                   {assessments.map(a => (
                     <tr key={a.id} className="hover:bg-surface-muted transition-smooth">
                       <td className="px-4 py-3.5 font-medium text-foreground-strong">{a.branch?.name || "كامل المدرسة"}</td>
-                      <td className="px-4 py-3.5 hidden md:table-cell text-muted-foreground">{a.assessor.name}</td>
+                      <td className="px-4 py-3.5 hidden md:table-cell text-muted-foreground">{a.assessor?.name ?? "غير محدد"}</td>
                       <td className="px-4 py-3.5 hidden md:table-cell text-muted-foreground numeric">{formatDate(a.startedAt.toISOString())}</td>
                       <td className="px-4 py-3.5 min-w-[120px]">
                         <div className="flex items-center gap-2">

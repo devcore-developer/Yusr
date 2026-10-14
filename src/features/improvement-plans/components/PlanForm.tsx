@@ -4,7 +4,7 @@ import { useState } from "react"
 import { Button } from "@/components/ui/Button"
 import { Input } from "@/components/ui/Input"
 import { Textarea } from "@/components/ui/Textarea"
-import { Select } from "@/components/ui/Select"
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/Select"
 import { savePlan } from "../actions"
 import { Loader2, Save, PlusCircle, Trash2 } from "lucide-react"
 
@@ -19,6 +19,8 @@ export function PlanForm({ plan, gap }: PlanFormProps) {
   const [actions, setActions] = useState<any[]>(
     plan?.actions?.length > 0 ? plan.actions : [{ title: "", status: "PENDING", startDate: "", dueDate: "" }]
   )
+  const [priority, setPriority] = useState(plan?.priority || "MEDIUM")
+  const [status, setStatus] = useState(plan?.status || "DRAFT")
 
   const handleAddAction = () => {
     setActions([...actions, { title: "", status: "PENDING", startDate: "", dueDate: "" }])
@@ -34,6 +36,11 @@ export function PlanForm({ plan, gap }: PlanFormProps) {
     setError(null)
     
     const formData = new FormData(e.currentTarget)
+    
+    // إضافة حالة الخطة والأولوية يدوياً للـ FormData لأن Radix Select لا يدعم name مباشرة في الـ form
+    formData.set("priority", priority)
+    formData.set("status", status)
+
     // إضافة مصفوفة الإجراءات إلى الـ FormData
     actions.forEach((action, index) => {
       formData.set(`actions[${index}][title]`, action.title)
@@ -76,18 +83,28 @@ export function PlanForm({ plan, gap }: PlanFormProps) {
           </div>
           <div className="space-y-1.5">
             <label className="text-sm font-medium">الأولوية</label>
-            <Select name="priority" defaultValue={plan?.priority || "MEDIUM"}>
-              <option value="HIGH">عالية</option>
-              <option value="MEDIUM">متوسطة</option>
-              <option value="LOW">منخفضة</option>
+            <Select value={priority} onValueChange={(val: string) => setPriority(val)}>
+              <SelectTrigger className="w-full">
+                <SelectValue placeholder="اختر الأولوية" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="HIGH">عالية</SelectItem>
+                <SelectItem value="MEDIUM">متوسطة</SelectItem>
+                <SelectItem value="LOW">منخفضة</SelectItem>
+              </SelectContent>
             </Select>
           </div>
           <div className="space-y-1.5">
             <label className="text-sm font-medium">الحالة</label>
-            <Select name="status" defaultValue={plan?.status || "DRAFT"}>
-              <option value="DRAFT">مسودة</option>
-              <option value="ACTIVE">جارية</option>
-              <option value="COMPLETED">مكتملة</option>
+            <Select value={status} onValueChange={(val: string) => setStatus(val)}>
+              <SelectTrigger className="w-full">
+                <SelectValue placeholder="اختر الحالة" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="DRAFT">مسودة</SelectItem>
+                <SelectItem value="ACTIVE">جارية</SelectItem>
+                <SelectItem value="COMPLETED">مكتملة</SelectItem>
+              </SelectContent>
             </Select>
           </div>
         </div>
@@ -187,16 +204,21 @@ export function PlanForm({ plan, gap }: PlanFormProps) {
                 <label className="text-xs font-medium">الحالة</label>
                 <Select 
                   value={action.status}
-                  onChange={(e) => {
+                  onValueChange={(val: string) => {
                     const newActions = [...actions]
-                    newActions[index].status = e.target.value
+                    newActions[index].status = val
                     setActions(newActions)
                   }}
                 >
-                  <option value="PENDING">لم يبدأ</option>
-                  <option value="IN_PROGRESS">جارية</option>
-                  <option value="COMPLETED">مكتملة</option>
-                  <option value="DELAYED">متعثرة</option>
+                  <SelectTrigger className="w-full">
+                    <SelectValue placeholder="الحالة" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="PENDING">لم يبدأ</SelectItem>
+                    <SelectItem value="IN_PROGRESS">جارية</SelectItem>
+                    <SelectItem value="COMPLETED">مكتملة</SelectItem>
+                    <SelectItem value="DELAYED">متعثرة</SelectItem>
+                  </SelectContent>
                 </Select>
               </div>
               <div className="md:col-span-1 flex justify-center">
