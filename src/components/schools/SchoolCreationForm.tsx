@@ -131,12 +131,12 @@ export function SchoolCreationForm() {
           </div>
         </div>
 
-        {/* القسم ج: بيانات مدير المدرسة */}
+        {/* القسم ج: بيانات المدير العام */}
         <div className="space-y-4 p-4 bg-surface-muted/30 rounded-lg">
-          <h3 className="text-lg font-bold text-foreground-strong border-r-4 border-secondary pr-3">حساب مدير المدرسة</h3>
+          <h3 className="text-lg font-bold text-foreground-strong border-r-4 border-secondary pr-3">حساب المدير العام</h3>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div className="space-y-1.5">
-              <label className="text-sm font-medium">اسم مدير المدرسة <span className="text-danger">*</span></label>
+              <label className="text-sm font-medium">اسم المدير العام <span className="text-danger">*</span></label>
               <Input name="managerName" required placeholder="أحمد محمد" />
             </div>
             <div className="space-y-1.5">
@@ -158,7 +158,7 @@ export function SchoolCreationForm() {
       </form>
 
       {/* نافذة نجاح الإنشاء وتسليم البيانات */}
-      <Modal isOpen={!!successData} onClose={() => setSuccessData(null)} title="تم إنشاء المدرسة بنجاح" description="يمكنك تسليم هذه البيانات لمدير المدرسة">
+      <Modal isOpen={!!successData} onClose={() => setSuccessData(null)} title="تم إنشاء المدرسة بنجاح" description="يمكنك تسليم هذه البيانات لالمدير العام">
         {successData && (
           <div className="space-y-4">
             <div className="p-4 bg-surface-muted rounded-lg space-y-2 text-sm">

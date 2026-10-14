@@ -55,7 +55,7 @@ export function Sidebar({ role, user }: SidebarProps) {
     grouped[g].push(item)
   }
 
-  const userName = user?.name ?? (role === "SUPER_ADMIN" ? "مدير النظام" : "مدير المدرسة")
+  const userName = user?.name ?? (role === "SUPER_ADMIN" ? "مدير النظام" : "المدير العام")
   const userEmail = user?.email ?? ""
   const accountItems = getAccountItems(role)
 

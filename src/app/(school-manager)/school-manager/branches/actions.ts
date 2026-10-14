@@ -21,7 +21,7 @@ export async function createBranch(formData: FormData) {
 
   if (!name) throw new Error("اسم الفرع مطلوب")
   if (!managerName || !managerEmail || !managerPassword) {
-    throw new Error("بيانات مدير الفرع (الاسم، البريد، كلمة المرور) مطلوبة")
+    throw new Error("بيانات مدير قسم (الاسم، البريد، كلمة المرور) مطلوبة")
   }
 
   // التحقق من عدم تكرار بريد المدير
@@ -45,7 +45,7 @@ export async function createBranch(formData: FormData) {
         }
       })
 
-      // 2. إنشاء حساب مدير الفرع وربطه بالفرع والمدرسة
+      // 2. إنشاء حساب مدير قسم وربطه بالفرع والمدرسة
       const manager = await tx.user.create({
         data: {
           name: managerName,

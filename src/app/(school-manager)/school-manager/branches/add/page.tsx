@@ -42,12 +42,12 @@ export default async function AddBranchPage() {
               </div>
             </div>
 
-            {/* القسم الثاني: حساب مدير الفرع */}
+            {/* القسم الثاني: حساب مدير قسم */}
             <div className="space-y-4 p-4 bg-surface-muted/30 rounded-lg">
-              <h3 className="text-lg font-bold text-foreground-strong border-r-4 border-secondary pr-3">حساب مدير الفرع</h3>
+              <h3 className="text-lg font-bold text-foreground-strong border-r-4 border-secondary pr-3">حساب مدير قسم</h3>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div className="space-y-1.5">
-                  <label className="text-sm font-medium">اسم مدير الفرع <span className="text-danger">*</span></label>
+                  <label className="text-sm font-medium">اسم مدير قسم <span className="text-danger">*</span></label>
                   <Input name="managerName" required placeholder="أحمد العتيبي" />
                 </div>
                 <div className="space-y-1.5">

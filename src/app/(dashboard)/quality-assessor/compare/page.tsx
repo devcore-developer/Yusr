@@ -64,7 +64,7 @@ export default async function ComparePage({ searchParams }: { searchParams: { id
               <div key={a.id} className="p-4 border border-border rounded-lg">
                 <p className="font-medium text-foreground-strong">{a.assessorName}</p>
                 <p className="text-xs text-muted-foreground mt-1">
-                  {a.assessorRole === "QUALITY_ASSESSOR" ? "مقيم جودة" : 
+                  {a.assessorRole === "QUALITY_ASSESSOR" ? "مشرف" : 
                    a.assessorRole === "SCHOOL_MANAGER" ? "مدير مدرسة" : 
                    a.assessorRole === "BRANCH_MANAGER" ? "مدير فرع" : a.assessorRole}
                 </p>

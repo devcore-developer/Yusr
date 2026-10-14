@@ -18,8 +18,8 @@ export default function AddUserPage({ searchParams }: { searchParams: { role?: s
   const userRole = searchParams.role === "BRANCH_MANAGER" ? "BRANCH_MANAGER" : "SCHOOL_MANAGER"
   
   const allowedRoles = userRole === "SCHOOL_MANAGER" 
-    ? [{ value: "BRANCH_MANAGER", label: "مدير فرع" }, { value: "QUALITY_ASSESSOR", label: "مقيم جودة" }]
-    : [{ value: "QUALITY_ASSESSOR", label: "مقيم جودة" }]
+    ? [{ value: "BRANCH_MANAGER", label: "مدير فرع" }, { value: "QUALITY_ASSESSOR", label: "مشرف" }]
+    : [{ value: "QUALITY_ASSESSOR", label: "مشرف" }]
 
   const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault()
@@ -41,7 +41,7 @@ export default function AddUserPage({ searchParams }: { searchParams: { role?: s
   return (
     <div className="space-y-6 max-w-2xl">
       <PageHeader
-        title={userRole === "BRANCH_MANAGER" ? "إضافة مقيم جودة" : "إضافة مستخدم"}
+        title={userRole === "BRANCH_MANAGER" ? "إضافة مشرف" : "إضافة مستخدم"}
         description="أدخل بيانات المستخدم الجديد."
         breadcrumbs={[{ label: 'الرئيسية', href: '/school-manager' }, { label: 'المستخدمون', href: '/school-manager/users' }, { label: 'إضافة' }]}
       />
@@ -82,7 +82,7 @@ export default function AddUserPage({ searchParams }: { searchParams: { role?: s
               <input type="hidden" name="role" value={allowedRoles[0].value} />
             )}
 
-            {/* حقل اختيار الفرع يظهر فقط لمدير المدرسة، أما مدير الفرع فيتم ربطه تلقائياً في الخادم */}
+            {/* حقل اختيار الفرع يظهر فقط لالمدير العام، أما مدير قسم فيتم ربطه تلقائياً في الخادم */}
             {userRole === "SCHOOL_MANAGER" && (
               <div className="space-y-1.5">
                 <label className="text-sm font-medium">الفرع</label>

@@ -29,7 +29,7 @@ export function getNavItems(role: string): NavItem[] {
     ]
   }
 
-  // === قائمة مقيم الجودة ===
+  // === قائمة مشرف ===
   if (role === "QUALITY_ASSESSOR") {
     return [
       { title: "لوحة التحكم", href: "/quality-assessor", icon: LayoutDashboard, group: "الرئيسية" },
@@ -49,7 +49,7 @@ export function getNavItems(role: string): NavItem[] {
     ]
   }
 
-  // === قائمة مدير المدرسة ومدير الفرع ===
+  // === قائمة المدير العام ومدير قسم ===
   const items: NavItem[] = [
     { title: "لوحة التحكم", href: "/school-manager", icon: LayoutDashboard, group: "الرئيسية" },
     { title: "التقييم بالأدوات", href: "/quality-assessor", icon: ClipboardCheck, group: "إدارة الجودة" },

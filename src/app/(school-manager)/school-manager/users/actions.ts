@@ -175,7 +175,7 @@ export async function createUser(formData: FormData) {
       return { error: "غير مصرح لك بإنشاء هذا الدور" }
     }
   } else if (user.role === "BRANCH_MANAGER") {
-    // إجبار الدور ليكون مقيم جودة فقط بغض النظر عما تم إرساله من المتصفح
+    // إجبار الدور ليكون مشرف فقط بغض النظر عما تم إرساله من المتصفح
     role = "QUALITY_ASSESSOR"
   }
 
@@ -194,7 +194,7 @@ export async function createUser(formData: FormData) {
         password: hashedPassword,
         role: role as any,
         schoolId: user.schoolId,
-        // مدير الفرع يُربط بفرعه تلقائياً، غيره يُربط حسب الاختيار من القائمة
+        // مدير قسم يُربط بفرعه تلقائياً، غيره يُربط حسب الاختيار من القائمة
         branchId: user.role === "BRANCH_MANAGER" ? user.branchId : (formData.get("branchId") as string || null),
         status: "ACTIVE"
       }

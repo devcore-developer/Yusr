@@ -85,7 +85,7 @@ export default async function PrintComparisonPage({ searchParams }: { searchPara
             <tr key={a.id}>
               <td>{a.assessorName}</td>
               <td>
-                {a.assessorRole === "QUALITY_ASSESSOR" ? "مقيم جودة" : 
+                {a.assessorRole === "QUALITY_ASSESSOR" ? "مشرف" : 
                  a.assessorRole === "SCHOOL_MANAGER" ? "مدير مدرسة" : 
                  a.assessorRole === "BRANCH_MANAGER" ? "مدير فرع" : a.assessorRole}
               </td>

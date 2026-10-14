@@ -18,7 +18,7 @@ export default async function SchoolManagerDashboard() {
   const user = await getCurrentUser()
   if (!user?.schoolId) return null
 
-  // === لوحة تحكم مدير الفرع ===
+  // === لوحة تحكم مدير قسم ===
   if (user.role === "BRANCH_MANAGER") {
     if (!user.branchId) redirect("/login")
 
@@ -58,7 +58,7 @@ export default async function SchoolManagerDashboard() {
     return (
       <div className="space-y-6 lg:space-y-8">
         <PageHeader
-          title="لوحة تحكم مدير الفرع"
+          title="لوحة تحكم مدير قسم"
           description="نظرة عامة على أداء فرعك والمستخدمين التابعين له."
           breadcrumbs={[{ label: 'الرئيسية', href: '/school-manager' }, { label: 'لوحة التحكم' }]}
         />
@@ -148,7 +148,7 @@ export default async function SchoolManagerDashboard() {
     )
   }
 
-  // === لوحة تحكم مدير المدرسة ===
+  // === لوحة تحكم المدير العام ===
   const schoolId = user.schoolId
 
   // استخدام دالة التجميع الموحدة للمدرسة

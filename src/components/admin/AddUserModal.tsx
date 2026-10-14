@@ -19,13 +19,13 @@ export function AddUserModal({ userRole, branches }: { userRole: string, branche
   const [error, setError] = useState("")
 
   const allowedRoles = userRole === "SCHOOL_MANAGER" 
-    ? [{ value: "BRANCH_MANAGER", label: "مدير فرع" }, { value: "QUALITY_ASSESSOR", label: "مقيم جودة" }]
+    ? [{ value: "BRANCH_MANAGER", label: "مدير فرع" }, { value: "QUALITY_ASSESSOR", label: "مشرف" }]
     : userRole === "BRANCH_MANAGER"
-    ? [{ value: "QUALITY_ASSESSOR", label: "مقيم جودة" }] // مقيم جودة فقط
+    ? [{ value: "QUALITY_ASSESSOR", label: "مشرف" }] // مشرف فقط
     : [
         { value: "SCHOOL_MANAGER", label: "مدير مدرسة" },
         { value: "BRANCH_MANAGER", label: "مدير فرع" },
-        { value: "QUALITY_ASSESSOR", label: "مقيم جودة" }
+        { value: "QUALITY_ASSESSOR", label: "مشرف" }
       ]
 
   const handleSubmit = async (formData: FormData) => {
@@ -44,10 +44,10 @@ export function AddUserModal({ userRole, branches }: { userRole: string, branche
     <>
       {/* تغيير نص الزر حسب الدور */}
       <Button variant="primary" size="md" icon={<UserPlus className="w-4 h-4" />} onClick={() => setIsOpen(true)}>
-        {userRole === "BRANCH_MANAGER" ? "إضافة مقيم جودة" : "إضافة مستخدم"}
+        {userRole === "BRANCH_MANAGER" ? "إضافة مشرف" : "إضافة مستخدم"}
       </Button>
 
-      <Modal isOpen={isOpen} onClose={() => setIsOpen(false)} title={userRole === "BRANCH_MANAGER" ? "إنشاء حساب مقيم جودة" : "إنشاء حساب مستخدم جديد"}>
+      <Modal isOpen={isOpen} onClose={() => setIsOpen(false)} title={userRole === "BRANCH_MANAGER" ? "إنشاء حساب مشرف" : "إنشاء حساب مستخدم جديد"}>
         <form action={handleSubmit} className="space-y-4">
           {error && <div className="p-3 bg-danger/10 text-danger rounded-lg text-sm">{error}</div>}
           
@@ -64,7 +64,7 @@ export function AddUserModal({ userRole, branches }: { userRole: string, branche
             <Input name="password" type="password" required placeholder="6 أحرف على الأقل" />
           </div>
 
-          {/* إظهار حقل الدور فقط إذا كان هناك أكثر من خيار (أي ليس مدير الفرع) */}
+          {/* إظهار حقل الدور فقط إذا كان هناك أكثر من خيار (أي ليس مدير قسم) */}
           {allowedRoles.length > 1 ? (
             <div className="space-y-1.5">
               <label className="text-sm font-medium">الدور</label>
@@ -79,7 +79,7 @@ export function AddUserModal({ userRole, branches }: { userRole: string, branche
             <input type="hidden" name="role" value={allowedRoles[0].value} />
           )}
 
-          {/* إظهار قائمة الفروع لمدير المدرسة فقط */}
+          {/* إظهار قائمة الفروع لالمدير العام فقط */}
           {userRole === "SCHOOL_MANAGER" && (
             <div className="space-y-1.5">
               <label className="text-sm font-medium">الفرع</label>
@@ -92,7 +92,7 @@ export function AddUserModal({ userRole, branches }: { userRole: string, branche
             </div>
           )}
 
-          {/* حقول مخفية لمدير الفرع ليتم ربط المقيّم بفرعه تلقائياً */}
+          {/* حقول مخفية لمدير قسم ليتم ربط المقيّم بفرعه تلقائياً */}
           {userRole === "BRANCH_MANAGER" && (
             <input type="hidden" name="branchId" value={branches[0]?.id || ""} />
           )}

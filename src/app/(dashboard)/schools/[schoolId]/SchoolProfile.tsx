@@ -298,7 +298,7 @@ export function SchoolProfile({ school, branches, users, assessments, subscripti
                         </td>
                         <td className="px-4 py-3.5">
                           <Badge variant={u.role === 'SCHOOL_MANAGER' ? 'info' : u.role === 'BRANCH_MANAGER' ? 'violet' : u.role === 'QUALITY_ASSESSOR' ? 'amber' : 'neutral'}>
-                            {u.role === 'SCHOOL_MANAGER' ? 'مدير مدرسة' : u.role === 'BRANCH_MANAGER' ? 'مدير فرع' : u.role === 'QUALITY_ASSESSOR' ? 'مقيم جودة' : 'مستخدم'}
+                            {u.role === 'SCHOOL_MANAGER' ? 'مدير مدرسة' : u.role === 'BRANCH_MANAGER' ? 'مدير فرع' : u.role === 'QUALITY_ASSESSOR' ? 'مشرف' : 'مستخدم'}
                           </Badge>
                         </td>
                         <td className="px-4 py-3.5 text-muted-foreground">{u.branch?.name ?? 'كامل المدرسة'}</td>

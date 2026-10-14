@@ -26,7 +26,7 @@ const ROUTE_LABELS: Record<string, string> = {
   activity: 'النشاطات',
   settings: 'الإعدادات',
   quality: 'الجودة',
-  'quality-assessor': 'مقيم الجودة',
+  'quality-assessor': 'مشرف',
   'ai-assistant': 'المساعد الذكي',
   assessments: 'التقييمات',
   gaps: 'الفجوات',

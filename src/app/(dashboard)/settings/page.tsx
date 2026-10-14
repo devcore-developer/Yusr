@@ -101,7 +101,7 @@ export default async function SettingsPage() {
                 <Badge variant="danger">مدير النظام (Super Admin)</Badge>
                 <Badge variant="info">مدير مدرسة (School Manager)</Badge>
                 <Badge variant="warning">مدير فرع (Branch Manager)</Badge>
-                <Badge variant="success">مقيم جودة (Quality Assessor)</Badge>
+                <Badge variant="success">مشرف (Quality Assessor)</Badge>
               </div>
             </div>
           )}

@@ -184,19 +184,19 @@ export async function createUser(formData: FormData) {
   let finalRole: UserRole = role as UserRole
 
   if (currentUser.role === "BRANCH_MANAGER") {
-    // مدير الفرع لا يمكنه إنشاء سوى "مقيم جودة" في فرعه فقط، بغض النظر عما أرسله من المتصفح
+    // مدير قسم لا يمكنه إنشاء سوى "مشرف" في فرعه فقط، بغض النظر عما أرسله من المتصفح
     finalRole = "QUALITY_ASSESSOR"
     finalSchoolId = currentUser.schoolId
     finalBranchId = currentUser.branchId
     
   } else if (currentUser.role === "SCHOOL_MANAGER") {
-    // مدير المدرسة يمكنه إنشاء "مدير فرع" أو "مقيم جودة" في فروعه فقط
+    // المدير العام يمكنه إنشاء "مدير فرع" أو "مشرف" في فروعه فقط
     if (finalRole !== "BRANCH_MANAGER" && finalRole !== "QUALITY_ASSESSOR") {
       return { error: "غير مصرح لك بإنشاء هذا الدور" }
     }
     if (!branchId) return { error: "يجب اختيار فرع" }
     
-    // التأكد من أن الفرع المختار يتبع مدرسة مدير المدرسة وليس مدرسة أخرى
+    // التأكد من أن الفرع المختار يتبع مدرسة المدير العام وليس مدرسة أخرى
     const branch = await prisma.branch.findFirst({ 
       where: { id: branchId, schoolId: currentUser.schoolId! } 
     })

@@ -20,7 +20,7 @@ const roleConfig: Record<string, { label: string; variant: 'danger' | 'info' | '
   SUPER_ADMIN: { label: 'مدير النظام', variant: 'danger' },
   SCHOOL_MANAGER: { label: 'مدير مدرسة', variant: 'info' },
   BRANCH_MANAGER: { label: 'مدير فرع', variant: 'violet' },
-  QUALITY_ASSESSOR: { label: 'مقيم جودة', variant: 'amber' },
+  QUALITY_ASSESSOR: { label: 'مشرف', variant: 'amber' },
 }
 
 export default async function UsersPage({
@@ -107,7 +107,7 @@ export default async function UsersPage({
           <SelectContent>
             <SelectItem value="SCHOOL_MANAGER">مدير مدرسة</SelectItem>
             <SelectItem value="BRANCH_MANAGER">مدير فرع</SelectItem>
-            <SelectItem value="QUALITY_ASSESSOR">مقيم جودة</SelectItem>
+            <SelectItem value="QUALITY_ASSESSOR">مشرف</SelectItem>
           </SelectContent>
         </Select>
         <Select name="status" defaultValue={status}>

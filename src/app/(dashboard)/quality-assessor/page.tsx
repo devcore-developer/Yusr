@@ -118,7 +118,7 @@ export default async function AssessorDashboard() {
                           a.assessor?.role === "SCHOOL_MANAGER" ? "info" :
                           a.assessor?.role === "BRANCH_MANAGER" ? "warning" : "neutral"
                         }>
-                          {a.assessor?.role === "QUALITY_ASSESSOR" ? "مقيم جودة" :
+                          {a.assessor?.role === "QUALITY_ASSESSOR" ? "مشرف" :
                            a.assessor?.role === "SCHOOL_MANAGER" ? "مدير مدرسة" :
                            a.assessor?.role === "BRANCH_MANAGER" ? "مدير فرع" : a.assessor?.role}
                         </Badge>

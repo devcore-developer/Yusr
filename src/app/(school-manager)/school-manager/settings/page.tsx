@@ -43,7 +43,7 @@ export default async function SettingsPage() {
   )
 }
 
-// مكون بيانات المدرسة (لمدير المدرسة)
+// مكون بيانات المدرسة (لالمدير العام)
 async function SchoolSettingsCard({ schoolId }: { schoolId: string }) {
   const school = await prisma.school.findUnique({
     where: { id: schoolId },
@@ -96,7 +96,7 @@ async function SchoolSettingsCard({ schoolId }: { schoolId: string }) {
   )
 }
 
-// مكون بيانات الفرع (لمدير الفرع)
+// مكون بيانات الفرع (لمدير قسم)
 async function BranchSettingsCard({ branchId }: { branchId: string }) {
   const branch = await prisma.branch.findUnique({
     where: { id: branchId },
