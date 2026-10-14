@@ -99,8 +99,8 @@ export default async function SettingsPage() {
               <p className="text-sm text-muted-foreground mb-2">نظام الصلاحيات في يسر يعتمد على 4 أدوار ثابتة:</p>
               <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
                 <Badge variant="danger">مدير النظام (Super Admin)</Badge>
-                <Badge variant="info">مدير مدرسة (School Manager)</Badge>
-                <Badge variant="warning">مدير فرع (Branch Manager)</Badge>
+                <Badge variant="info">مدير عام (School Manager)</Badge>
+                <Badge variant="warning">مدير قسم (Branch Manager)</Badge>
                 <Badge variant="success">مشرف (Quality Assessor)</Badge>
               </div>
             </div>

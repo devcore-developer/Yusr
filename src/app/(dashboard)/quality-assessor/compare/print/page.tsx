@@ -86,8 +86,8 @@ export default async function PrintComparisonPage({ searchParams }: { searchPara
               <td>{a.assessorName}</td>
               <td>
                 {a.assessorRole === "QUALITY_ASSESSOR" ? "مشرف" : 
-                 a.assessorRole === "SCHOOL_MANAGER" ? "مدير مدرسة" : 
-                 a.assessorRole === "BRANCH_MANAGER" ? "مدير فرع" : a.assessorRole}
+                 a.assessorRole === "SCHOOL_MANAGER" ? "مدير عام" : 
+                 a.assessorRole === "BRANCH_MANAGER" ? "مدير قسم" : a.assessorRole}
               </td>
               <td>{a.schoolName}</td>
               <td>{a.branchName || "كامل المدرسة"}</td>

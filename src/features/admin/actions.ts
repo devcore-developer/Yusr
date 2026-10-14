@@ -190,7 +190,7 @@ export async function createUser(formData: FormData) {
     finalBranchId = currentUser.branchId
     
   } else if (currentUser.role === "SCHOOL_MANAGER") {
-    // المدير العام يمكنه إنشاء "مدير فرع" أو "مشرف" في فروعه فقط
+    // المدير العام يمكنه إنشاء "مدير قسم" أو "مشرف" في فروعه فقط
     if (finalRole !== "BRANCH_MANAGER" && finalRole !== "QUALITY_ASSESSOR") {
       return { error: "غير مصرح لك بإنشاء هذا الدور" }
     }

@@ -19,12 +19,12 @@ export function AddUserModal({ userRole, branches }: { userRole: string, branche
   const [error, setError] = useState("")
 
   const allowedRoles = userRole === "SCHOOL_MANAGER" 
-    ? [{ value: "BRANCH_MANAGER", label: "مدير فرع" }, { value: "QUALITY_ASSESSOR", label: "مشرف" }]
+    ? [{ value: "BRANCH_MANAGER", label: "مدير قسم" }, { value: "QUALITY_ASSESSOR", label: "مشرف" }]
     : userRole === "BRANCH_MANAGER"
     ? [{ value: "QUALITY_ASSESSOR", label: "مشرف" }] // مشرف فقط
     : [
-        { value: "SCHOOL_MANAGER", label: "مدير مدرسة" },
-        { value: "BRANCH_MANAGER", label: "مدير فرع" },
+        { value: "SCHOOL_MANAGER", label: "مدير عام" },
+        { value: "BRANCH_MANAGER", label: "مدير قسم" },
         { value: "QUALITY_ASSESSOR", label: "مشرف" }
       ]
 

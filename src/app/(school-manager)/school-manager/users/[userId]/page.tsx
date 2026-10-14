@@ -11,8 +11,8 @@ import { formatDate, formatRelativeTime } from "@/lib/utils"
 
 const roleConfig: Record<string, { label: string; variant: "danger" | "info" | "violet" | "amber" | "neutral" }> = {
   SUPER_ADMIN: { label: "مدير النظام", variant: "danger" },
-  SCHOOL_MANAGER: { label: "مدير مدرسة", variant: "info" },
-  BRANCH_MANAGER: { label: "مدير فرع", variant: "violet" },
+  SCHOOL_MANAGER: { label: "مدير عام", variant: "info" },
+  BRANCH_MANAGER: { label: "مدير قسم", variant: "violet" },
   QUALITY_ASSESSOR: { label: "مشرف", variant: "amber" },
 }
 

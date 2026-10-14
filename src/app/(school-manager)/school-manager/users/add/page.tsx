@@ -18,7 +18,7 @@ export default function AddUserPage({ searchParams }: { searchParams: { role?: s
   const userRole = searchParams.role === "BRANCH_MANAGER" ? "BRANCH_MANAGER" : "SCHOOL_MANAGER"
   
   const allowedRoles = userRole === "SCHOOL_MANAGER" 
-    ? [{ value: "BRANCH_MANAGER", label: "مدير فرع" }, { value: "QUALITY_ASSESSOR", label: "مشرف" }]
+    ? [{ value: "BRANCH_MANAGER", label: "مدير قسم" }, { value: "QUALITY_ASSESSOR", label: "مشرف" }]
     : [{ value: "QUALITY_ASSESSOR", label: "مشرف" }]
 
   const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {

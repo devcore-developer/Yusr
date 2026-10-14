@@ -119,8 +119,8 @@ export default async function AssessorDashboard() {
                           a.assessor?.role === "BRANCH_MANAGER" ? "warning" : "neutral"
                         }>
                           {a.assessor?.role === "QUALITY_ASSESSOR" ? "مشرف" :
-                           a.assessor?.role === "SCHOOL_MANAGER" ? "مدير مدرسة" :
-                           a.assessor?.role === "BRANCH_MANAGER" ? "مدير فرع" : a.assessor?.role}
+                           a.assessor?.role === "SCHOOL_MANAGER" ? "مدير عام" :
+                           a.assessor?.role === "BRANCH_MANAGER" ? "مدير قسم" : a.assessor?.role}
                         </Badge>
                       </td>
                       <td className="px-5 py-4 min-w-[120px]">

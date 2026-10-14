@@ -106,7 +106,7 @@ export default async function BranchDetailsPage({ params }: { params: { branchId
                       <p className="text-[12px] text-muted-foreground truncate">{u.email}</p>
                     </div>
                     <Badge variant={u.role === "BRANCH_MANAGER" ? "violet" : u.role === "QUALITY_ASSESSOR" ? "amber" : "neutral"}>
-                      {u.role === "BRANCH_MANAGER" ? "مدير فرع" : u.role === "QUALITY_ASSESSOR" ? "مقيم" : "مستخدم"}
+                      {u.role === "BRANCH_MANAGER" ? "مدير قسم" : u.role === "QUALITY_ASSESSOR" ? "مقيم" : "مستخدم"}
                     </Badge>
                     <StatusBadge status={u.status} />
                   </li>
