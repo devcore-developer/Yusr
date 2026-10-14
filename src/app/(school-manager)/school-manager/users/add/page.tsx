@@ -1,76 +1,107 @@
-import { prisma } from "@/lib/prisma"
-import { getCurrentUser } from "@/lib/permissions"
-import { redirect } from "next/navigation"
-import { PageHeader } from "@/components/layout/PageHeader"
-import { Card, CardContent } from "@/components/ui/Card"
+"use client"
+
+import { useState } from "react"
+import { useRouter } from "next/navigation"
 import { Button } from "@/components/ui/Button"
 import { Input } from "@/components/ui/Input"
-import { Select } from "@/components/ui/Select"
-import { createUser } from "../actions"
-import { UserPlus } from "lucide-react"
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/Select"
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/Card"
+import { createUser } from "@/features/admin/actions"
+import { Loader2, Save } from "lucide-react"
 
-export default async function AddUserPage() {
-  const user = await getCurrentUser()
-  if (!user || (user.role !== "SCHOOL_MANAGER" && user.role !== "BRANCH_MANAGER" && user.role !== "SUPER_ADMIN")) redirect("/school-manager")
+export default function AddUserPage({ searchParams }: { searchParams: { role?: string } }) {
+  const router = useRouter()
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState<string | null>(null)
 
-  // جلب الفروع التابعة لمدرسة المدير فقط (لا تظهر لمدير الفرع)
-  const branches = user.role === "BRANCH_MANAGER" ? [] : await prisma.branch.findMany({ where: { schoolId: user.schoolId! } })
+  // تحديد الأدوار بناءً على الرابط الذي تم الدخول منه
+  const userRole = searchParams.role === "BRANCH_MANAGER" ? "BRANCH_MANAGER" : "SCHOOL_MANAGER"
+  
+  const allowedRoles = userRole === "SCHOOL_MANAGER" 
+    ? [{ value: "BRANCH_MANAGER", label: "مدير فرع" }, { value: "QUALITY_ASSESSOR", label: "مقيم جودة" }]
+    : [{ value: "QUALITY_ASSESSOR", label: "مقيم جودة" }]
+
+  const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
+    e.preventDefault()
+    setLoading(true)
+    setError(null)
+    
+    const formData = new FormData(e.currentTarget)
+    const res = await createUser(formData)
+    
+    if (res?.error) {
+      setError(res.error)
+      setLoading(false)
+    } else if (res?.success) {
+      router.push("/school-manager/users")
+      router.refresh()
+    }
+  }
 
   return (
-    <div className="space-y-6 max-w-2xl mx-auto">
+    <div className="space-y-6 max-w-2xl">
       <PageHeader
-        title="إضافة مستخدم جديد"
-        description={user.role === "BRANCH_MANAGER" ? "إنشاء حساب مقيم جودة تابع لفرعك." : "إنشاء حساب لمدير فرع أو مقيم جودة تابع لمدرستك."}
-        breadcrumbs={[{ label: "الرئيسية", href: "/" }, { label: "المستخدمون", href: "/school-manager/users" }, { label: "إضافة مستخدم" }]}
+        title={userRole === "BRANCH_MANAGER" ? "إضافة مقيم جودة" : "إضافة مستخدم"}
+        description="أدخل بيانات المستخدم الجديد."
+        breadcrumbs={[{ label: 'الرئيسية', href: '/school-manager' }, { label: 'المستخدمون', href: '/school-manager/users' }, { label: 'إضافة' }]}
       />
+
       <Card>
         <CardContent className="p-6">
-          <form action={createUser} className="space-y-4">
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div className="space-y-1.5">
-                <label className="text-sm font-medium">الاسم الكامل <span className="text-danger">*</span></label>
-                <Input name="name" required />
-              </div>
-              <div className="space-y-1.5">
-                <label className="text-sm font-medium">البريد الإلكتروني <span className="text-danger">*</span></label>
-                <Input name="email" type="email" required />
-              </div>
-              <div className="space-y-1.5">
-                <label className="text-sm font-medium">كلمة المرور <span className="text-danger">*</span></label>
-                <Input name="password" type="password" required />
-              </div>
-              <div className="space-y-1.5">
-                <label className="text-sm font-medium">الدور <span className="text-danger">*</span></label>
-                <Select name="role" required disabled={user.role === "BRANCH_MANAGER"}>
-                  {user.role === "SUPER_ADMIN" && <option value="SCHOOL_MANAGER">مدير مدرسة</option>}
-                  {(user.role === "SUPER_ADMIN" || user.role === "SCHOOL_MANAGER") && <option value="BRANCH_MANAGER">مدير فرع</option>}
-                  <option value="QUALITY_ASSESSOR">مقيم جودة</option>
-                </Select>
-                {user.role === "BRANCH_MANAGER" && (
-                  <input type="hidden" name="role" value="QUALITY_ASSESSOR" />
-                )}
-              </div>
-              
-              {/* لا تظهر قائمة الفروع لمدير الفرع لأنه مرتبط بفرعه تلقائياً */}
-              {user.role !== "BRANCH_MANAGER" && (
-                <div className="space-y-1.5 md:col-span-2">
-                  <label className="text-sm font-medium">الفرع (اختياري)</label>
-                  <Select name="branchId">
-                    <option value="">بدون فرع محدد</option>
-                    {branches.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
-                  </Select>
-                </div>
-              )}
-            </div>
+          <form onSubmit={handleSubmit} className="space-y-4">
+            {error && <div className="p-3 bg-danger/10 text-danger rounded-lg text-sm">{error}</div>}
             
-            {user.role === "BRANCH_MANAGER" && (
-              <p className="text-xs text-muted-foreground bg-surface-muted p-3 rounded-lg">
-                سيتم ربط هذا المستخدم (مقيم جودة) بفرعك الحالي تلقائياً.
-              </p>
+            <div className="space-y-1.5">
+              <label className="text-sm font-medium">الاسم الكامل</label>
+              <Input name="name" required />
+            </div>
+
+            <div className="space-y-1.5">
+              <label className="text-sm font-medium">البريد الإلكتروني</label>
+              <Input name="email" type="email" required />
+            </div>
+
+            <div className="space-y-1.5">
+              <label className="text-sm font-medium">كلمة المرور</label>
+              <Input name="password" type="password" required placeholder="6 أحرف على الأقل" />
+            </div>
+
+            {allowedRoles.length > 1 ? (
+              <div className="space-y-1.5">
+                <label className="text-sm font-medium">الدور</label>
+                <Select name="role" defaultValue={allowedRoles[0].value}>
+                  <SelectTrigger className="w-full">
+                    <SelectValue placeholder="اختر الدور" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {allowedRoles.map(r => <SelectItem key={r.value} value={r.value}>{r.label}</SelectItem>)}
+                  </SelectContent>
+                </Select>
+              </div>
+            ) : (
+              <input type="hidden" name="role" value={allowedRoles[0].value} />
             )}
 
-            <div className="flex justify-end pt-4">
-              <Button type="submit" icon={<UserPlus className="w-4 h-4" />}>حفظ وإنشاء الحساب</Button>
+            {/* حقل اختيار الفرع يظهر فقط لمدير المدرسة، أما مدير الفرع فيتم ربطه تلقائياً في الخادم */}
+            {userRole === "SCHOOL_MANAGER" && (
+              <div className="space-y-1.5">
+                <label className="text-sm font-medium">الفرع</label>
+                <Select name="branchId" required>
+                  <SelectTrigger className="w-full">
+                    <SelectValue placeholder="اختر الفرع" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {/* سيتم تحميل الفروع ديناميكياً إذا أردت، أو يمكنك تمريرها كـ props */}
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
+
+            <div className="flex justify-end gap-2 pt-4">
+              <Button type="button" variant="ghost" onClick={() => router.back()}>إلغاء</Button>
+              <Button type="submit" disabled={loading} icon={loading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}>
+                {loading ? "جاري الحفظ..." : "حفظ المستخدم"}
+              </Button>
             </div>
           </form>
         </CardContent>
@@ -78,3 +109,6 @@ export default async function AddUserPage() {
     </div>
   )
 }
+
+// استيراد PageHeader داخل الملف
+import { PageHeader } from "@/components/layout/PageHeader"

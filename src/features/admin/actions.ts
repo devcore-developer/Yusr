@@ -4,6 +4,7 @@ import { prisma } from "@/lib/prisma"
 import { getCurrentUser } from "@/lib/permissions"
 import bcrypt from "bcryptjs"
 import { revalidatePath } from "next/cache"
+import { UserRole } from "@prisma/client"
 
 async function verifyConfirmation(password: string, confirmPhrase: string, actionType: "DELETE_SCHOOL" | "DELETE_USER") {
   const user = await getCurrentUser()
@@ -61,7 +62,6 @@ export async function deleteSchool(schoolId: string, password: string, confirmPh
   if (!school) return { error: "School not found" }
 
   try {
-    // 1. تحديد جميع المستخدمين المرتبطين بالمدرسة حصرياً (باستثناء السوبر أدمن)
     const usersToDelete = await prisma.user.findMany({
       where: {
         OR: [
@@ -74,7 +74,6 @@ export async function deleteSchool(schoolId: string, password: string, confirmPh
     })
     const userIds = usersToDelete.map(u => u.id)
 
-    // 2. تنفيذ الحذف في معاملة واحدة (Transaction)
     await prisma.$transaction([
       prisma.improvementAction.deleteMany({ where: { plan: { schoolId } } }),
       prisma.improvementFollowUp.deleteMany({ where: { plan: { schoolId } } }),
@@ -86,13 +85,10 @@ export async function deleteSchool(schoolId: string, password: string, confirmPh
       prisma.evidence.deleteMany({ where: { assessment: { schoolId } } }),
       prisma.assessment.deleteMany({ where: { schoolId } }),
       prisma.survey.deleteMany({ where: { schoolId } }),
-      // حذف المستخدمين المرتبطين بالمدرسة
       prisma.user.deleteMany({ where: { id: { in: userIds } } }),
-      // أخيراً، حذف المدرسة
       prisma.school.delete({ where: { id: schoolId } })
     ])
     
-    // 3. تسجيل النشاط (schoolId يكون null لعدم وجود المدرسة بعد الآن)
     await prisma.activity.create({
       data: {
         actorId: user!.id,
@@ -122,7 +118,6 @@ export async function deleteUser(userId: string, password: string, confirmPhrase
   const targetUser = await prisma.user.findUnique({ where: { id: userId } })
   if (!targetUser) return { error: "المستخدم غير موجود" }
 
-  // التحقق من الصلاحيات: مدير المدرسة يمكنه حذف مستخدمي مدرسته فقط (باستثناء السوبر أدمن)
   if (user!.role === "SCHOOL_MANAGER") {
     if (targetUser.schoolId !== user!.schoolId) {
       return { error: "غير مصرح لك بحذف مستخدمين خارج مدرستك." }
@@ -134,7 +129,6 @@ export async function deleteUser(userId: string, password: string, confirmPhrase
     return { error: "غير مصرح لك." }
   }
 
-  // منع حذف آخر حساب سوبر أدمن
   if (targetUser.role === "SUPER_ADMIN") {
     const superAdminCount = await prisma.user.count({ where: { role: "SUPER_ADMIN" } })
     if (superAdminCount <= 1) return { error: "لا يمكن حذف حساب مدير النظام الوحيد المتبقي." }
@@ -158,5 +152,102 @@ export async function deleteUser(userId: string, password: string, confirmPhrase
     return { success: true }
   } catch (e) {
     return { error: "فشل حذف المستخدم بسبب تبعيات البيانات." }
+  }
+}
+
+export async function createUser(formData: FormData) {
+  const currentUser = await getCurrentUser()
+  if (!currentUser) return { error: "غير مصرح لك بهذا الإجراء." }
+
+  const name = formData.get("name") as string
+  const email = formData.get("email") as string
+  const password = formData.get("password") as string
+  const role = formData.get("role") as string
+  const branchId = formData.get("branchId") as string
+
+  if (!name || !email || !password || !role) {
+    return { error: "جميع الحقول مطلوبة" }
+  }
+
+  if (password.length < 6) {
+    return { error: "كلمة المرور يجب أن تكون 6 أحرف على الأقل" }
+  }
+
+  const existingUser = await prisma.user.findUnique({ where: { email } })
+  if (existingUser) {
+    return { error: "البريد الإلكتروني مستخدم بالفعل" }
+  }
+
+  // === فحوصات الأمان والصلاحيات الصارمة (Security Enforcement) ===
+  let finalSchoolId: string | null = null
+  let finalBranchId: string | null = null
+  let finalRole: UserRole = role as UserRole
+
+  if (currentUser.role === "BRANCH_MANAGER") {
+    // مدير الفرع لا يمكنه إنشاء سوى "مقيم جودة" في فرعه فقط، بغض النظر عما أرسله من المتصفح
+    finalRole = "QUALITY_ASSESSOR"
+    finalSchoolId = currentUser.schoolId
+    finalBranchId = currentUser.branchId
+    
+  } else if (currentUser.role === "SCHOOL_MANAGER") {
+    // مدير المدرسة يمكنه إنشاء "مدير فرع" أو "مقيم جودة" في فروعه فقط
+    if (finalRole !== "BRANCH_MANAGER" && finalRole !== "QUALITY_ASSESSOR") {
+      return { error: "غير مصرح لك بإنشاء هذا الدور" }
+    }
+    if (!branchId) return { error: "يجب اختيار فرع" }
+    
+    // التأكد من أن الفرع المختار يتبع مدرسة مدير المدرسة وليس مدرسة أخرى
+    const branch = await prisma.branch.findFirst({ 
+      where: { id: branchId, schoolId: currentUser.schoolId! } 
+    })
+    if (!branch) return { error: "الفرع المختار غير تابع لمدرستك" }
+    
+    finalSchoolId = currentUser.schoolId
+    finalBranchId = branchId
+
+  } else if (currentUser.role === "SUPER_ADMIN") {
+    // السوبر أدمن حر في إنشاء أي دور لأي مدرسة/فرع
+    finalSchoolId = currentUser.schoolId || formData.get("schoolId") as string
+    finalBranchId = branchId || null
+    
+  } else {
+    return { error: "غير مصرح لك بإنشاء مستخدمين" }
+  }
+
+  try {
+    const hashedPassword = await bcrypt.hash(password, 10)
+
+    const newUser = await prisma.user.create({
+      data: {
+        name,
+        email,
+        password: hashedPassword,
+        role: finalRole,
+        schoolId: finalSchoolId,
+        branchId: finalBranchId,
+        status: "ACTIVE"
+      }
+    })
+
+    await prisma.activity.create({
+      data: {
+        actorId: currentUser.id,
+        schoolId: finalSchoolId,
+        branchId: finalBranchId,
+        action: "CREATE",
+        entityType: "USER",
+        entityId: newUser.id,
+        metadata: { name: newUser.name, email: newUser.email, role: newUser.role }
+      }
+    })
+
+    revalidatePath("/school-manager/users")
+    revalidatePath("/users")
+    revalidatePath("/school-manager") // لتحديث الإحصائيات
+    
+    return { success: true }
+  } catch (error) {
+    console.error(error)
+    return { error: "حدث خطأ غير متوقع أثناء إنشاء الحساب." }
   }
 }

@@ -12,6 +12,7 @@ import { EmptyState } from "@/components/ui/EmptyState"
 import { ChevronLeft, ChevronRight, Search, Users as UsersIcon, Eye } from "lucide-react"
 import Link from "next/link"
 import { formatRelativeTime } from "@/lib/utils"
+import { AddUserModal } from "@/components/admin/AddUserModal"
 
 export const metadata = { title: "المستخدمون" }
 
@@ -28,7 +29,20 @@ export default async function UsersPage({
   searchParams: { [key: string]: string | string[] | undefined }
 }) {
   const user = await getCurrentUser()
-  if (!user || !user.schoolId) redirect("/login")
+  if (!user) redirect("/login")
+
+  let branches: any[] = []
+  const where: Record<string, unknown> = {}
+
+  if (user.role === "SCHOOL_MANAGER" && user.schoolId) {
+    branches = await prisma.branch.findMany({ where: { schoolId: user.schoolId }, select: { id: true, name: true } })
+    where.schoolId = user.schoolId
+  } else if (user.role === "BRANCH_MANAGER" && user.branchId) {
+    branches = await prisma.branch.findMany({ where: { id: user.branchId }, select: { id: true, name: true } })
+    where.branchId = user.branchId
+  } else {
+    redirect("/login")
+  }
 
   const q = typeof searchParams.q === 'string' ? searchParams.q : undefined
   const role = typeof searchParams.role === 'string' ? searchParams.role : undefined
@@ -36,7 +50,6 @@ export default async function UsersPage({
   const page = parseInt(typeof searchParams.page === 'string' ? searchParams.page : '1') || 1
   const pageSize = 10
 
-  const where: Record<string, unknown> = { schoolId: user.schoolId }
   if (q) {
     where.OR = [
       { name: { contains: q, mode: 'insensitive' } },
@@ -50,12 +63,7 @@ export default async function UsersPage({
     prisma.user.findMany({
       where,
       select: {
-        id: true,
-        name: true,
-        email: true,
-        role: true,
-        status: true,
-        createdAt: true,
+        id: true, name: true, email: true, role: true, status: true, createdAt: true,
         branch: { select: { id: true, name: true } },
         activities: { take: 1, orderBy: { createdAt: 'desc' }, select: { createdAt: true } },
       },
@@ -84,10 +92,11 @@ export default async function UsersPage({
         title="المستخدمون"
         description="إدارة مستخدمي مدرستك."
         breadcrumbs={[{ label: 'الرئيسية', href: '/school-manager' }, { label: 'المستخدمون' }]}
+        actions={<AddUserModal userRole={user.role} branches={branches} />}
       />
 
       <form className="flex flex-wrap items-center gap-3 p-4 bg-surface border border-border rounded-lg min-w-0">
-        <div className="relative flex-1 min-w-[200px] min-w-0">
+        <div className="relative flex-1 min-w-[200px]">
           <Search className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground pointer-events-none" />
           <Input name="q" defaultValue={q} placeholder="ابحث بالاسم أو البريد..." className="pr-10" />
         </div>
