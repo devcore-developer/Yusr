@@ -117,14 +117,27 @@ export async function deleteUser(userId: string, password: string, confirmPhrase
   const { error, user } = await verifyConfirmation(password, confirmPhrase, "DELETE_USER")
   if (error) return { error }
 
-  if (userId === user!.id) return { error: "You cannot delete your own account." }
+  if (userId === user!.id) return { error: "لا يمكنك حذف حسابك الخاص." }
 
   const targetUser = await prisma.user.findUnique({ where: { id: userId } })
-  if (!targetUser) return { error: "User not found" }
+  if (!targetUser) return { error: "المستخدم غير موجود" }
 
+  // التحقق من الصلاحيات: مدير المدرسة يمكنه حذف مستخدمي مدرسته فقط (باستثناء السوبر أدمن)
+  if (user!.role === "SCHOOL_MANAGER") {
+    if (targetUser.schoolId !== user!.schoolId) {
+      return { error: "غير مصرح لك بحذف مستخدمين خارج مدرستك." }
+    }
+    if (targetUser.role === "SUPER_ADMIN") {
+      return { error: "لا يمكنك حذف حساب مدير النظام." }
+    }
+  } else if (user!.role !== "SUPER_ADMIN") {
+    return { error: "غير مصرح لك." }
+  }
+
+  // منع حذف آخر حساب سوبر أدمن
   if (targetUser.role === "SUPER_ADMIN") {
     const superAdminCount = await prisma.user.count({ where: { role: "SUPER_ADMIN" } })
-    if (superAdminCount <= 1) return { error: "Cannot delete the last Super Admin account." }
+    if (superAdminCount <= 1) return { error: "لا يمكن حذف حساب مدير النظام الوحيد المتبقي." }
   }
 
   try {
@@ -141,8 +154,9 @@ export async function deleteUser(userId: string, password: string, confirmPhrase
     })
     
     revalidatePath("/users")
+    revalidatePath("/school-manager/users")
     return { success: true }
   } catch (e) {
-    return { error: "Failed to delete user due to dependencies." }
+    return { error: "فشل حذف المستخدم بسبب تبعيات البيانات." }
   }
 }

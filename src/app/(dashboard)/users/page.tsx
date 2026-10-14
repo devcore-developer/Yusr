@@ -11,6 +11,7 @@ import { EmptyState } from "@/components/ui/EmptyState"
 import { ChevronLeft, ChevronRight, Search, Users as UsersIcon, UserPlus, Eye, Pencil, FilterX } from "lucide-react"
 import Link from "next/link"
 import { formatRelativeTime } from "@/lib/utils"
+import { UserDeleteButton } from "@/components/admin/UserDeleteButton"
 
 export const metadata = { title: "المستخدمون" }
 
@@ -207,6 +208,7 @@ export default async function UsersPage({
                             <Button variant="ghost" size="icon-sm" aria-label="تعديل">
                               <Pencil className="w-4 h-4" />
                             </Button>
+                            <UserDeleteButton userId={u.id} userName={u.name} />
                           </div>
                         </td>
                       </tr>

@@ -7,7 +7,7 @@ import { Input } from "@/components/ui/Input"
 import { deleteUser } from "@/features/admin/actions"
 import { Trash2, AlertTriangle } from "lucide-react"
 
-export function UserDeleteButton({ userId, userName, userEmail }: { userId: string, userName: string, userEmail: string }) {
+export function UserDeleteButton({ userId, userName }: { userId: string, userName: string }) {
   const [isOpen, setIsOpen] = useState(false)
   const [password, setPassword] = useState("")
   const [confirmPhrase, setConfirmPhrase] = useState("")
@@ -56,7 +56,7 @@ export function UserDeleteButton({ userId, userName, userEmail }: { userId: stri
             <AlertTriangle className="w-5 h-5 shrink-0 mt-0.5" />
             <div>
               <p className="font-bold">تحذير: عملية لا يمكن التراجع عنها</p>
-              <p>أنت على وشك حذف المستخدم "{userName}" ({userEmail}) نهائياً. سيتم احتفاظ السجلات التاريخية (التقييمات، النشاطات) لكن سيتم فك ارتباط الحساب.</p>
+              <p>أنت على وشك حذف المستخدم "{userName}" نهائياً. سيتم الاحتفاظ بسجلات التقييمات التاريخية لكن سيتم فك ارتباط الحساب.</p>
             </div>
           </div>
           
