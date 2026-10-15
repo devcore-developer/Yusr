@@ -14,6 +14,7 @@ import {
 import Link from "next/link"
 import { formatDate } from "@/lib/utils"
 import { SchoolDeleteButton } from "@/components/admin/SchoolDeleteButton"
+import { EditSchoolModal } from "@/components/admin/EditSchoolModal"
 
 export const metadata = { title: "المدارس" }
 
@@ -174,6 +175,7 @@ export default async function SchoolsPage({
                             <Link href={`/schools/${school.id}`}>
                               <Button variant="ghost" size="icon-sm" aria-label="عرض" icon={<Eye className="w-4 h-4" />} />
                             </Link>
+                            <EditSchoolModal school={school} />
                             <SchoolDeleteButton schoolId={school.id} schoolName={school.name} />
                           </div>
                         </td>

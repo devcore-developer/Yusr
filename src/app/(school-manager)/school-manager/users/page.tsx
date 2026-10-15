@@ -13,6 +13,7 @@ import { ChevronLeft, ChevronRight, Search, Users as UsersIcon, Eye } from "luci
 import Link from "next/link"
 import { formatRelativeTime } from "@/lib/utils"
 import { AddUserModal } from "@/components/admin/AddUserModal"
+import { EditUserModal } from "@/components/admin/EditUserModal"
 
 export const metadata = { title: "المستخدمون" }
 
@@ -172,6 +173,7 @@ export default async function UsersPage({
                             <Button variant="ghost" size="icon-sm" aria-label="عرض">
                               <Eye className="w-4 h-4" />
                             </Button>
+                            <EditUserModal user={u} currentUserRole={user.role} />
                           </div>
                         </td>
                       </tr>

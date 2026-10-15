@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/Button"
 import { StatusBadge } from "@/components/ui/Badge"
 import { Building2, Plus, MapPin, Phone } from "lucide-react"
 import Link from "next/link"
+import { EditBranchModal } from "@/components/admin/EditBranchModal"
 
 export default async function BranchesPage() {
   const user = await getCurrentUser()
@@ -46,13 +47,14 @@ export default async function BranchesPage() {
             </div>
           ) : (
             <div className="overflow-x-auto scrollbar-thin">
-              <table className="w-full text-sm text-right">
+              <table className="w-full text-sm text-right min-w-[600px]">
                 <thead className="text-[12px] text-muted-foreground bg-surface-muted uppercase">
                   <tr>
                     <th className="px-6 py-4 font-medium">اسم الفرع</th>
                     <th className="px-6 py-4 font-medium hidden md:table-cell">الموقع</th>
                     <th className="px-6 py-4 font-medium hidden lg:table-cell">الهاتف</th>
                     <th className="px-6 py-4 font-medium">الحالة</th>
+                    <th className="px-6 py-4 font-medium text-left">إجراءات</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-border">
@@ -78,6 +80,11 @@ export default async function BranchesPage() {
                       </td>
                       <td className="px-6 py-4">
                         <StatusBadge status={branch.status} />
+                      </td>
+                      <td className="px-6 py-4">
+                        <div className="flex items-center gap-1 justify-end">
+                          <EditBranchModal branch={branch} />
+                        </div>
                       </td>
                     </tr>
                   ))}

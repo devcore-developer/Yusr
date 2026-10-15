@@ -20,11 +20,9 @@ export default async function SettingsPage() {
   const isAssessor = user.role === "QUALITY_ASSESSOR"
   const isSuperAdmin = user.role === "SUPER_ADMIN"
 
-  // جلب أحدث بيانات من قاعدة البيانات لضمان ربطها بشكل صحيح
   const dbUser = await prisma.user.findUnique({ where: { id: user.id } })
   if (!dbUser) redirect("/login")
 
-  // جلب سجل النسخ الاحتياطي للسوبر أدمن فقط
   const backupHistory = isSuperAdmin 
     ? await prisma.backupHistory.findMany({ orderBy: { createdAt: "desc" }, take: 10 }) 
     : []
@@ -37,7 +35,6 @@ export default async function SettingsPage() {
         breadcrumbs={[{ label: 'الرئيسية', href: '/' }, { label: 'الإعدادات' }]}
       />
 
-      {/* 1. Profile Card (يظهر لجميع الأدوار ما عدا المقيم) */}
       {!isAssessor && (
         <Card variant="primary">
           <CardHeader>
@@ -70,14 +67,12 @@ export default async function SettingsPage() {
         </Card>
       )}
 
-      {/* 2. Security & Permissions Card (يظهر للجميع) */}
       <Card variant="primary">
         <CardHeader>
           <CardTitle icon={<Shield className="w-5 h-5" />}>الأمان والصلاحيات</CardTitle>
           <CardDescription>تغيير كلمة المرور وإدارة الوصول</CardDescription>
         </CardHeader>
         <CardContent>
-          {/* نموذج تغيير كلمة المرور */}
           <form action={updatePassword} className="grid grid-cols-1 md:grid-cols-2 gap-5 mb-6">
             <div className="space-y-1.5">
               <label className="text-[13px] font-medium text-foreground-strong">كلمة المرور الجديدة</label>
@@ -92,7 +87,6 @@ export default async function SettingsPage() {
             </div>
           </form>
           
-          {/* قسم الأدوار يظهر للسوبر أدمن فقط */}
           {isSuperAdmin && (
             <div className="mt-6 pt-6 border-t border-border">
               <h4 className="text-sm font-bold mb-2">الأدوار والصلاحيات</h4>
@@ -108,7 +102,6 @@ export default async function SettingsPage() {
         </CardContent>
       </Card>
 
-      {/* 3. Backup & Data Card (يظهر للسوبر أدمن فقط) */}
       {isSuperAdmin && (
         <Card variant="primary">
           <CardHeader>

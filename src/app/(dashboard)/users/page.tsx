@@ -8,10 +8,11 @@ import { Badge, StatusBadge } from "@/components/ui/Badge"
 import { Input } from "@/components/ui/Input"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/Select"
 import { EmptyState } from "@/components/ui/EmptyState"
-import { ChevronLeft, ChevronRight, Search, Users as UsersIcon, UserPlus, Eye, Pencil, FilterX } from "lucide-react"
+import { ChevronLeft, ChevronRight, Search, Users as UsersIcon, UserPlus, Eye, FilterX } from "lucide-react"
 import Link from "next/link"
 import { formatRelativeTime } from "@/lib/utils"
 import { UserDeleteButton } from "@/components/admin/UserDeleteButton"
+import { EditUserModal } from "@/components/admin/EditUserModal"
 
 export const metadata = { title: "المستخدمون" }
 
@@ -27,7 +28,7 @@ export default async function UsersPage({
 }: {
   searchParams: { [key: string]: string | string[] | undefined }
 }) {
-  await requireRole(["SUPER_ADMIN"])
+  const user = await requireRole(["SUPER_ADMIN"])
 
   const q = typeof searchParams.q === 'string' ? searchParams.q : undefined
   const role = typeof searchParams.role === 'string' ? searchParams.role : undefined
@@ -205,9 +206,7 @@ export default async function UsersPage({
                             <Button variant="ghost" size="icon-sm" aria-label="عرض">
                               <Eye className="w-4 h-4" />
                             </Button>
-                            <Button variant="ghost" size="icon-sm" aria-label="تعديل">
-                              <Pencil className="w-4 h-4" />
-                            </Button>
+                            <EditUserModal user={u} currentUserRole={user.role} />
                             <UserDeleteButton userId={u.id} userName={u.name} />
                           </div>
                         </td>

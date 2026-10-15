@@ -178,76 +178,142 @@ export async function createUser(formData: FormData) {
     return { error: "البريد الإلكتروني مستخدم بالفعل" }
   }
 
-  // === فحوصات الأمان والصلاحيات الصارمة (Security Enforcement) ===
   let finalSchoolId: string | null = null
   let finalBranchId: string | null = null
   let finalRole: UserRole = role as UserRole
 
   if (currentUser.role === "BRANCH_MANAGER") {
-    // مدير قسم لا يمكنه إنشاء سوى "مشرف" في فرعه فقط، بغض النظر عما أرسله من المتصفح
     finalRole = "QUALITY_ASSESSOR"
     finalSchoolId = currentUser.schoolId
     finalBranchId = currentUser.branchId
-    
   } else if (currentUser.role === "SCHOOL_MANAGER") {
-    // المدير العام يمكنه إنشاء "مدير قسم" أو "مشرف" في فروعه فقط
     if (finalRole !== "BRANCH_MANAGER" && finalRole !== "QUALITY_ASSESSOR") {
       return { error: "غير مصرح لك بإنشاء هذا الدور" }
     }
     if (!branchId) return { error: "يجب اختيار فرع" }
-    
-    // التأكد من أن الفرع المختار يتبع مدرسة المدير العام وليس مدرسة أخرى
-    const branch = await prisma.branch.findFirst({ 
-      where: { id: branchId, schoolId: currentUser.schoolId! } 
-    })
-    if (!branch) return { error: "الفرع المختار غير تابع لمدرستك" }
-    
+    const branch = await prisma.branch.findFirst({ where: { id: branchId, schoolId: currentUser.schoolId! } })
+    if (!branch) return { error: "الفرع غير تابع لمدرستك" }
     finalSchoolId = currentUser.schoolId
     finalBranchId = branchId
-
-  } else if (currentUser.role === "SUPER_ADMIN") {
-    // السوبر أدمن حر في إنشاء أي دور لأي مدرسة/فرع
-    finalSchoolId = currentUser.schoolId || formData.get("schoolId") as string
-    finalBranchId = branchId || null
-    
-  } else {
+  } else if (currentUser.role !== "SUPER_ADMIN") {
     return { error: "غير مصرح لك بإنشاء مستخدمين" }
   }
 
   try {
     const hashedPassword = await bcrypt.hash(password, 10)
-
     const newUser = await prisma.user.create({
-      data: {
-        name,
-        email,
-        password: hashedPassword,
-        role: finalRole,
-        schoolId: finalSchoolId,
-        branchId: finalBranchId,
-        status: "ACTIVE"
-      }
+      data: { name, email, password: hashedPassword, role: finalRole, schoolId: finalSchoolId, branchId: finalBranchId, status: "ACTIVE" }
     })
-
     await prisma.activity.create({
-      data: {
-        actorId: currentUser.id,
-        schoolId: finalSchoolId,
-        branchId: finalBranchId,
-        action: "CREATE",
-        entityType: "USER",
-        entityId: newUser.id,
-        metadata: { name: newUser.name, email: newUser.email, role: newUser.role }
-      }
+      data: { actorId: currentUser.id, schoolId: finalSchoolId, branchId: finalBranchId, action: "CREATE", entityType: "USER", entityId: newUser.id, metadata: { name, email, role: finalRole } }
     })
-
     revalidatePath("/school-manager/users")
     revalidatePath("/users")
-    revalidatePath("/school-manager") // لتحديث الإحصائيات
-    
     return { success: true }
   } catch (error) {
-    console.error(error)
     return { error: "حدث خطأ غير متوقع أثناء إنشاء الحساب." }
+  }
+}
+
+// === دوال التعديل الجديدة ===
+
+export async function updateSchool(schoolId: string, formData: FormData) {
+  const user = await getCurrentUser()
+  if (!user) return { error: "غير مصرح" }
+
+  if (user.role !== "SUPER_ADMIN" && !(user.role === "SCHOOL_MANAGER" && user.schoolId === schoolId)) {
+    return { error: "غير مصرح لك بتعديل بيانات هذه المدرسة" }
+  }
+
+  const name = formData.get("name") as string
+  const location = formData.get("location") as string
+  const phone = formData.get("phone") as string
+  const logoUrl = formData.get("logoUrl") as string
+
+  try {
+    await prisma.school.update({ where: { id: schoolId }, data: { name, location, phone, logoUrl: logoUrl || undefined } })
+    await prisma.activity.create({ data: { actorId: user.id, schoolId, action: "UPDATE", entityType: "SCHOOL", entityId: schoolId, metadata: { name } } })
+    revalidatePath("/schools")
+    revalidatePath("/school-manager")
+    revalidatePath("/", "layout")
+    return { success: true }
+  } catch (error) {
+    return { error: "حدث خطأ أثناء تحديث بيانات المدرسة" }
+  }
+}
+
+export async function updateBranch(branchId: string, formData: FormData) {
+  const user = await getCurrentUser()
+  if (!user) return { error: "غير مصرح" }
+
+  const branch = await prisma.branch.findUnique({ where: { id: branchId } })
+  if (!branch) return { error: "الفرع غير موجود" }
+
+  if (user.role === "SCHOOL_MANAGER" && branch.schoolId !== user.schoolId) return { error: "غير مصرح لك بتعديل فروع خارج مدرستك" }
+  if (user.role === "BRANCH_MANAGER" && user.branchId !== branchId) return { error: "غير مصرح لك بتعديل فروع أخرى" }
+  if (user.role !== "SUPER_ADMIN" && user.role !== "SCHOOL_MANAGER" && user.role !== "BRANCH_MANAGER") return { error: "غير مصرح" }
+
+  const name = formData.get("name") as string
+  const location = formData.get("location") as string
+  const phone = formData.get("phone") as string
+
+  try {
+    await prisma.branch.update({ where: { id: branchId }, data: { name, location, phone } })
+    await prisma.activity.create({ data: { actorId: user.id, schoolId: branch.schoolId, branchId, action: "UPDATE", entityType: "BRANCH", entityId: branchId, metadata: { name } } })
+    revalidatePath("/school-manager/branches")
+    revalidatePath("/school-manager")
+    return { success: true }
+  } catch (error) {
+    return { error: "حدث خطأ أثناء تحديث بيانات الفرع" }
+  }
+}
+
+export async function adminUpdateUser(userId: string, formData: FormData) {
+  const currentUser = await getCurrentUser()
+  if (!currentUser) return { error: "غير مصرح" }
+
+  const targetUser = await prisma.user.findUnique({ where: { id: userId } })
+  if (!targetUser) return { error: "المستخدم غير موجود" }
+
+  if (currentUser.role === "SCHOOL_MANAGER") {
+    if (targetUser.schoolId !== currentUser.schoolId) return { error: "غير مصرح لك بتعديل مستخدمين خارج مدرستك" }
+    if (targetUser.role === "SUPER_ADMIN") return { error: "لا يمكنك تعديل حساب مدير النظام" }
+  } else if (currentUser.role !== "SUPER_ADMIN") {
+    return { error: "غير مصرح" }
+  }
+
+  const name = formData.get("name") as string
+  const email = formData.get("email") as string
+  const role = formData.get("role") as UserRole
+
+  if (currentUser.role === "SCHOOL_MANAGER" && role === "SUPER_ADMIN") return { error: "لا يمكنك إنشاء أو تعديل حساب ليكون مدير نظام" }
+
+  const emailExists = await prisma.user.findFirst({ where: { email, NOT: { id: userId } } })
+  if (emailExists) return { error: "البريد الإلكتروني مستخدم بالفعل" }
+
+  try {
+    await prisma.user.update({ where: { id: userId }, data: { name, email, role } })
+    await prisma.activity.create({ data: { actorId: currentUser.id, schoolId: targetUser.schoolId, action: "UPDATE", entityType: "USER", entityId: userId, metadata: { name, email, role } } })
+    revalidatePath("/users")
+    revalidatePath("/school-manager/users")
+    return { success: true }
+  } catch (error) {
+    return { error: "حدث خطأ أثناء تحديث بيانات المستخدم" }
+  }
+}
+
+export async function adminResetPassword(userId: string, newPassword: string) {
+  const currentUser = await getCurrentUser()
+  if (!currentUser || currentUser.role !== "SUPER_ADMIN") return { error: "غير مصرح" }
+
+  if (newPassword.length < 6) return { error: "كلمة المرور يجب أن تكون 6 أحرف على الأقل" }
+
+  try {
+    const hashedPassword = await bcrypt.hash(newPassword, 10)
+    await prisma.user.update({ where: { id: userId }, data: { password: hashedPassword } })
+    await prisma.activity.create({ data: { actorId: currentUser.id, action: "PASSWORD_RESET", entityType: "USER", entityId: userId, metadata: { info: "Admin reset password" } } })
+    return { success: true }
+  } catch (error) {
+    return { error: "حدث خطأ أثناء إعادة تعيين كلمة المرور" }
   }
 }
