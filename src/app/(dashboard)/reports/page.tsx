@@ -350,7 +350,7 @@ export default async function ReportsPage({
         {perf.evaluators.length > 0 && (
           <Card className="hidden md:block">
             <CardContent className="p-6">
-              <h3 className="font-bold mb-4">تقرير المقيمين الفردي</h3>
+              <h3 className="font-bold mb-4">تقرير المشرفين الفردي</h3>
               <div className="overflow-x-auto">
                 <table className="w-full text-sm text-right min-w-[600px]">
                   <thead className="text-[12px] text-muted-foreground bg-surface-muted">
@@ -457,7 +457,7 @@ export default async function ReportsPage({
             <form action="/reports/print" method="GET">
               <input type="hidden" name="scope" value="comprehensive" />
               <input type="hidden" name="branchId" value={branch.id} />
-              <Button type="submit" variant="outline">تقرير مقارنة المقيمين (PDF)</Button>
+              <Button type="submit" variant="outline">تقرير مقارنة المشرفين (PDF)</Button>
             </form>
           </div>
         </Card>
@@ -513,7 +513,7 @@ export default async function ReportsPage({
         {perf.evaluators.length > 0 && (
           <Card className="hidden md:block">
             <CardContent className="p-6">
-              <h3 className="font-bold mb-4">تقرير المقيمين</h3>
+              <h3 className="font-bold mb-4">تقرير المشرفين</h3>
               <div className="overflow-x-auto">
                 <table className="w-full text-sm text-right min-w-[500px]">
                   <thead className="text-[12px] text-muted-foreground bg-surface-muted">

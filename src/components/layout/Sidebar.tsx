@@ -31,7 +31,7 @@ function classifyItem(item: NavItem): string {
 }
 
 function getAccountItems(role: string) {
-  let settingsHref = "/settings" // الافتراضي للسوبر أدمن والمقيم
+  let settingsHref = "/settings" // الافتراضي للسوبر أدمن والمشرف
   if (role === "SCHOOL_MANAGER" || role === "BRANCH_MANAGER") {
     settingsHref = "/school-manager/settings"
   }

@@ -61,9 +61,9 @@ export function EditUserModal({ user, currentUserRole }: { user: any, currentUse
               <Select name="role" defaultValue={user.role} disabled={currentUserRole !== "SUPER_ADMIN"}>
                 <SelectTrigger className="w-full"><SelectValue /></SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="SCHOOL_MANAGER">مدير مدرسة</SelectItem>
-                  <SelectItem value="BRANCH_MANAGER">مدير فرع</SelectItem>
-                  <SelectItem value="QUALITY_ASSESSOR">مقيم جودة</SelectItem>
+                  <SelectItem value="SCHOOL_MANAGER">مدير عام</SelectItem>
+                  <SelectItem value="BRANCH_MANAGER">مدير قسم</SelectItem>
+                  <SelectItem value="QUALITY_ASSESSOR">مشرف</SelectItem>
                   {currentUserRole === "SUPER_ADMIN" && <SelectItem value="SUPER_ADMIN">مدير نظام</SelectItem>}
                 </SelectContent>
               </Select>
