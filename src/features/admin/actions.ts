@@ -186,7 +186,7 @@ export async function createUser(formData: FormData) {
     finalRole = "QUALITY_ASSESSOR"
     finalSchoolId = currentUser.schoolId
     finalBranchId = currentUser.branchId
-    // معالجة الربط المزدوج: لو مدير الفرع مرتبط عبر Branch.managerId فقط
+    // معالجة الربط المزدوج: لو مدير القسم مرتبط عبر Branch.managerId فقط
     if (!finalBranchId) {
       const managedBranches = await prisma.branch.findMany({
         where: { managerId: currentUser.id },
@@ -323,7 +323,7 @@ export async function adminUpdateUser(userId: string, formData: FormData) {
       return { error: "غير مصرح لك بتعيين هذا الدور" }
     }
   } else if (currentUser.role === "BRANCH_MANAGER") {
-    // مدير الفرع: تعديل بيانات المشرفين (QUALITY_ASSESSOR) التابعين لفرعه فقط
+    // مدير القسم: تعديل بيانات المشرفين (QUALITY_ASSESSOR) التابعين لفرعه فقط
     if (!currentUser.schoolId || targetUser.schoolId !== currentUser.schoolId) {
       return { error: "غير مصرح لك بتعديل مقيّمين خارج فرعك" }
     }
@@ -334,7 +334,7 @@ export async function adminUpdateUser(userId: string, formData: FormData) {
     if (!targetUser.branchId || !authorizedBranchIds.includes(targetUser.branchId)) {
       return { error: "غير مصرح لك بتعديل مقيّمين خارج فرعك" }
     }
-    // لا يحق لمدير الفرع تغيير الأدوار — يتم تجاهل أي دور مُرسل من الطرف الآخر
+    // لا يحق لمدير القسم تغيير الأدوار — يتم تجاهل أي دور مُرسل من الطرف الآخر
   } else {
     return { error: "غير مصرح" }
   }

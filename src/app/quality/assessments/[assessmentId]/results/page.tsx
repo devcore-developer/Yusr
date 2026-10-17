@@ -30,7 +30,7 @@ export default async function AssessmentResultsPage({ params }: { params: { asse
 
   // فحص وصول موحد على الخادم — يغلق ثغرتين:
   // 1) BRANCH_MANAGER كان بلا أي فحص (يمكنه فتح نتائج أي مدرسة)
-  // 2) التقييمات الخاصة (PRIVATE_REVIEW) كانت تظهر لمدير المدرسة
+  // 2) التقييمات الخاصة (PRIVATE_REVIEW) كانت تظهر لالمدير العام
   const allowed = await assertAssessmentAccess(user, assessment, "read")
   if (!allowed) redirect("/")
 

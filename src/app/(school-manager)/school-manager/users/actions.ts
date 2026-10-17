@@ -176,7 +176,7 @@ export async function createUser(formData: FormData) {
     if (role !== "BRANCH_MANAGER" && role !== "QUALITY_ASSESSOR") {
       return { error: "غير مصرح لك بإنشاء هذا الدور" }
     }
-    // الإصلاح: التحقق أن الفرع المختار يتبع مدرسة مدير المدرسة فعلاً (كان غائباً)
+    // الإصلاح: التحقق أن الفرع المختار يتبع مدرسة المدير العام فعلاً (كان غائباً)
     const selectedBranchId = formData.get("branchId") as string
     if (!selectedBranchId) {
       return { error: "يجب اختيار فرع" }

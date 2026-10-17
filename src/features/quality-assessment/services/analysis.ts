@@ -67,7 +67,7 @@ export async function getPlatformAnalytics() {
 }
 
 export async function getSchoolAnalytics(schoolId: string): Promise<BranchAnalytics> {
-  // الإصلاح: تحليلات المدرسة (تتضمن أسماء المقيّمين ونتائجهم) لمدير المدرسة أو مدير النظام فقط
+  // الإصلاح: تحليلات المدرسة (تتضمن أسماء المقيّمين ونتائجهم) لالمدير العام أو مدير النظام فقط
   const user = await getCurrentUser()
   if (!user) throw new Error("Unauthorized")
   if (user.role !== "SUPER_ADMIN" && !(user.role === "SCHOOL_MANAGER" && user.schoolId === schoolId)) {
@@ -162,7 +162,7 @@ export async function getSchoolAnalytics(schoolId: string): Promise<BranchAnalyt
 }
 
 export async function getBranchAnalytics(branchId: string): Promise<BranchAnalytics> {
-  // الإصلاح: تحليلات الفرع لمدير القسم (فرعه) أو مدير المدرسة (فروع مدرسته) أو مدير النظام فقط
+  // الإصلاح: تحليلات الفرع لمدير القسم (فرعه) أو المدير العام (فروع مدرسته) أو مدير النظام فقط
   const user = await getCurrentUser()
   if (!user) throw new Error("Unauthorized")
 
