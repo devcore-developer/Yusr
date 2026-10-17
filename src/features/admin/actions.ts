@@ -1,7 +1,7 @@
 "use server"
 
 import { prisma } from "@/lib/prisma"
-import { getCurrentUser } from "@/lib/permissions"
+import { getCurrentUser, getAuthorizedBranchIds } from "@/lib/permissions"
 import bcrypt from "bcryptjs"
 import { revalidatePath } from "next/cache"
 import { UserRole } from "@prisma/client"
@@ -186,6 +186,14 @@ export async function createUser(formData: FormData) {
     finalRole = "QUALITY_ASSESSOR"
     finalSchoolId = currentUser.schoolId
     finalBranchId = currentUser.branchId
+    // معالجة الربط المزدوج: لو مدير الفرع مرتبط عبر Branch.managerId فقط
+    if (!finalBranchId) {
+      const managedBranches = await prisma.branch.findMany({
+        where: { managerId: currentUser.id },
+        select: { id: true }
+      })
+      if (managedBranches.length === 1) finalBranchId = managedBranches[0].id
+    }
   } else if (currentUser.role === "SCHOOL_MANAGER") {
     if (finalRole !== "BRANCH_MANAGER" && finalRole !== "QUALITY_ASSESSOR") {
       return { error: "غير مصرح لك بإنشاء هذا الدور" }
@@ -214,8 +222,6 @@ export async function createUser(formData: FormData) {
     return { error: "حدث خطأ غير متوقع أثناء إنشاء الحساب." }
   }
 }
-
-// === دوال التعديل الجديدة ===
 
 export async function updateSchool(schoolId: string, formData: FormData) {
   const user = await getCurrentUser()
@@ -250,7 +256,11 @@ export async function updateBranch(branchId: string, formData: FormData) {
   if (!branch) return { error: "الفرع غير موجود" }
 
   if (user.role === "SCHOOL_MANAGER" && branch.schoolId !== user.schoolId) return { error: "غير مصرح لك بتعديل فروع خارج مدرستك" }
-  if (user.role === "BRANCH_MANAGER" && user.branchId !== branchId) return { error: "غير مصرح لك بتعديل فروع أخرى" }
+  if (user.role === "BRANCH_MANAGER") {
+    // يدعم الربط المزدوج: branchId مباشرة أو إدارة الفرع عبر Branch.managerId
+    const authorizedBranchIds = await getAuthorizedBranchIds(user)
+    if (!authorizedBranchIds.includes(branchId)) return { error: "غير مصرح لك بتعديل فروع أخرى" }
+  }
   if (user.role !== "SUPER_ADMIN" && user.role !== "SCHOOL_MANAGER" && user.role !== "BRANCH_MANAGER") return { error: "غير مصرح" }
 
   const name = formData.get("name") as string
@@ -275,25 +285,72 @@ export async function adminUpdateUser(userId: string, formData: FormData) {
   const targetUser = await prisma.user.findUnique({ where: { id: userId } })
   if (!targetUser) return { error: "المستخدم غير موجود" }
 
-  if (currentUser.role === "SCHOOL_MANAGER") {
-    if (targetUser.schoolId !== currentUser.schoolId) return { error: "غير مصرح لك بتعديل مستخدمين خارج مدرستك" }
-    if (targetUser.role === "SUPER_ADMIN") return { error: "لا يمكنك تعديل حساب مدير النظام" }
-  } else if (currentUser.role !== "SUPER_ADMIN") {
-    return { error: "غير مصرح" }
-  }
-
+  // ملاحظة جوهرية (سبب الخطأ الأصلي): حقل الدور قد يكون غائباً تماماً من FormData
+  // لأن قائمة الدور تُعرض disabled لغير مدير النظام، والعناصر المعطلة لا تُرسل قيمها.
+  // لذلك نتعامل معه كقيمة اختيارية ولا نمرر null إلى Prisma أبداً.
   const name = formData.get("name") as string
   const email = formData.get("email") as string
-  const role = formData.get("role") as UserRole
+  const submittedRole = formData.get("role") as string | null
 
-  if (currentUser.role === "SCHOOL_MANAGER" && role === "SUPER_ADMIN") return { error: "لا يمكنك إنشاء أو تعديل حساب ليكون مدير نظام" }
+  if (!name || !email) {
+    return { error: "الاسم والبريد الإلكتروني مطلوبان" }
+  }
+
+  if (submittedRole && !["SUPER_ADMIN", "SCHOOL_MANAGER", "BRANCH_MANAGER", "QUALITY_ASSESSOR"].includes(submittedRole)) {
+    return { error: "الدور المحدد غير صالح" }
+  }
+
+  // === فحص النطاق والصلاحيات حسب دور المستخدم الحالي (على الخادم) ===
+  if (currentUser.role === "SUPER_ADMIN") {
+    // مدير النظام يعدّل الجميع — مع منع إزالة آخر مدير نظام في المنصة
+    if (targetUser.role === "SUPER_ADMIN" && submittedRole && submittedRole !== "SUPER_ADMIN") {
+      const superAdminCount = await prisma.user.count({ where: { role: "SUPER_ADMIN" } })
+      if (superAdminCount <= 1) {
+        return { error: "لا يمكن تغيير دور مدير النظام الوحيد المتبقي" }
+      }
+    }
+  } else if (currentUser.role === "SCHOOL_MANAGER") {
+    if (!currentUser.schoolId || targetUser.schoolId !== currentUser.schoolId) {
+      return { error: "غير مصرح لك بتعديل مستخدمين خارج مدرستك" }
+    }
+    if (targetUser.role === "SUPER_ADMIN") {
+      return { error: "لا يمكنك تعديل حساب مدير النظام" }
+    }
+    if (submittedRole === "SUPER_ADMIN") {
+      return { error: "لا يمكنك إنشاء أو تعديل حساب ليكون مدير نظام" }
+    }
+    if (submittedRole && submittedRole !== "BRANCH_MANAGER" && submittedRole !== "QUALITY_ASSESSOR") {
+      return { error: "غير مصرح لك بتعيين هذا الدور" }
+    }
+  } else if (currentUser.role === "BRANCH_MANAGER") {
+    // مدير الفرع: تعديل بيانات المشرفين (QUALITY_ASSESSOR) التابعين لفرعه فقط
+    if (!currentUser.schoolId || targetUser.schoolId !== currentUser.schoolId) {
+      return { error: "غير مصرح لك بتعديل مقيّمين خارج فرعك" }
+    }
+    if (targetUser.role !== "QUALITY_ASSESSOR") {
+      return { error: "يمكنك تعديل حسابات المشرفين فقط" }
+    }
+    const authorizedBranchIds = await getAuthorizedBranchIds(currentUser)
+    if (!targetUser.branchId || !authorizedBranchIds.includes(targetUser.branchId)) {
+      return { error: "غير مصرح لك بتعديل مقيّمين خارج فرعك" }
+    }
+    // لا يحق لمدير الفرع تغيير الأدوار — يتم تجاهل أي دور مُرسل من الطرف الآخر
+  } else {
+    return { error: "غير مصرح" }
+  }
 
   const emailExists = await prisma.user.findFirst({ where: { email, NOT: { id: userId } } })
   if (emailExists) return { error: "البريد الإلكتروني مستخدم بالفعل" }
 
+  const data: { name: string; email: string; role?: UserRole } = { name, email }
+  // يُحدَّث الدور فقط إذا أُرسل فعلاً وكان لمرسله حق تغييره
+  if (submittedRole && currentUser.role !== "BRANCH_MANAGER") {
+    data.role = submittedRole as UserRole
+  }
+
   try {
-    await prisma.user.update({ where: { id: userId }, data: { name, email, role } })
-    await prisma.activity.create({ data: { actorId: currentUser.id, schoolId: targetUser.schoolId, action: "UPDATE", entityType: "USER", entityId: userId, metadata: { name, email, role } } })
+    await prisma.user.update({ where: { id: userId }, data })
+    await prisma.activity.create({ data: { actorId: currentUser.id, schoolId: targetUser.schoolId, action: "UPDATE", entityType: "USER", entityId: userId, metadata: { name, email, role: data.role ?? targetUser.role } } })
     revalidatePath("/users")
     revalidatePath("/school-manager/users")
     return { success: true }

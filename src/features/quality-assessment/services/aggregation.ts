@@ -1,4 +1,5 @@
 import { prisma } from "@/lib/prisma"
+import { getCurrentUser, checkAssessmentAccess } from "@/lib/permissions"
 import { getPerformanceBand } from "./analysis"
 
 export interface ComparisonResult {
@@ -22,6 +23,18 @@ export interface AggregatedResult {
 }
 
 export async function compareAssessments(assessmentIds: string[]) {
+  // الإصلاح: حراسة داخلية — أي مستدٍٍى لهذه الخدمة (صفحة المقارنة أو الطباعة)
+  // يمر إلزامياً عبر فحص الوصول لكل تقييم مطلوب، فلا يمكن استغلالها من مسار منسي
+  const currentUser = await getCurrentUser()
+  if (!currentUser) throw new Error("غير مصرح")
+
+  for (const id of assessmentIds) {
+    const access = await checkAssessmentAccess(id, "read")
+    if (!access.allowed) {
+      throw new Error("غير مصرح بمقارنة أحد التقييمات المحددة")
+    }
+  }
+
   const assessments = await prisma.assessment.findMany({
     where: { id: { in: assessmentIds } },
     include: {

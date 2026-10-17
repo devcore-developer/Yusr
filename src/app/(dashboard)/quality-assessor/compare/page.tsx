@@ -1,5 +1,5 @@
 import { prisma } from "@/lib/prisma"
-import { getCurrentUser } from "@/lib/permissions"
+import { getCurrentUser, checkAssessmentAccess } from "@/lib/permissions"
 import { redirect } from "next/navigation"
 import { PageHeader } from "@/components/layout/PageHeader"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/Card"
@@ -17,19 +17,13 @@ export default async function ComparePage({ searchParams }: { searchParams: { id
     redirect("/quality-assessor")
   }
 
-  // Authorization check
-  const assessments = await prisma.assessment.findMany({
-    where: { id: { in: assessmentIds } },
-    select: { schoolId: true, branchId: true }
-  })
-
-  if (user.role !== "SUPER_ADMIN") {
-    const hasUnauthorized = assessments.some(a => {
-      if (user.role === "SCHOOL_MANAGER") return a.schoolId !== user.schoolId
-      if (user.role === "BRANCH_MANAGER") return a.branchId !== user.branchId
-      return false
-    })
-    if (hasUnauthorized) redirect("/quality-assessor")
+  // فحص وصول موحد لكل تقييم مختار — على الخادم
+  // (سابقاً كان QUALITY_ASSESSOR يتجاوز الفحص بالكامل فيقارن أي تقييم في أي مدرسة — ثغرة)
+  for (const id of assessmentIds) {
+    const access = await checkAssessmentAccess(id, "read")
+    if (!access.allowed) {
+      redirect("/quality-assessor")
+    }
   }
 
   const result = await compareAssessments(assessmentIds)

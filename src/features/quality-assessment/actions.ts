@@ -1,7 +1,7 @@
 "use server"
 
 import { prisma } from "@/lib/prisma"
-import { getCurrentUser } from "@/lib/permissions"
+import { getCurrentUser, checkAssessmentAccess } from "@/lib/permissions"
 import { revalidatePath } from "next/cache"
 import { redirect } from "next/navigation"
 
@@ -171,6 +171,12 @@ export async function uploadAttachment(assessmentId: string, evidenceId: string,
   const user = await getCurrentUser()
   if (!user) throw new Error("Unauthorized")
 
+  // الإصلاح: كان هذا الإجراء مفتوحاً لأي مستخدم على أي تقييم — الآن يُفرض فحص الكتابة
+  const access = await checkAssessmentAccess(assessmentId, "write")
+  if (!access.allowed) {
+    throw new Error("Forbidden: You can only modify assessments assigned to you.")
+  }
+
   const allowedTypes = ['application/pdf', 'application/msword', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', 'image/jpeg', 'image/png', 'image/svg+xml']
   if (!allowedTypes.includes(file.type)) throw new Error("نوع الملف غير مدعوم")
   if (file.size > 2 * 1024 * 1024) throw new Error("حجم الملف يتجاوز 2 ميجابايت")
@@ -192,10 +198,24 @@ export async function deleteAttachment(attachmentId: string, assessmentId: strin
   const user = await getCurrentUser()
   if (!user) throw new Error("Unauthorized")
 
-  await prisma.assessmentAttachment.delete({
+  // الإصلاح: كان هذا الإجراء يحذف أي مرفق بأي ID بدون أي فحص — ثغرة حذف جماعي
+  const attachment = await prisma.assessmentAttachment.findUnique({
+    where: { id: attachmentId }
+  })
+  if (!attachment || attachment.assessmentId !== assessmentId) {
+    throw new Error("Attachment not found")
+  }
+
+  const access = await checkAssessmentAccess(assessmentId, "write")
+  if (!access.allowed) {
+    throw new Error("Forbidden: You can only modify assessments assigned to you.")
+  }
+
+  return await prisma.assessmentAttachment.delete({
     where: { id: attachmentId }
   })
 }
+
 export async function createNewAssessment() {
   const user = await getCurrentUser()
   if (!user || !user.schoolId) throw new Error("Unauthorized")

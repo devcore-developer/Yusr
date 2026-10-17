@@ -1,5 +1,5 @@
 import { prisma } from "@/lib/prisma"
-import { getCurrentUser } from "@/lib/permissions"
+import { getCurrentUser, assertAssessmentAccess } from "@/lib/permissions"
 import { redirect } from "next/navigation"
 import { PageHeader } from "@/components/layout/PageHeader"
 import { Card, CardHeader, CardTitle, CardContent, CardDescription } from "@/components/ui/Card"
@@ -28,9 +28,11 @@ export default async function AssessmentResultsPage({ params }: { params: { asse
   
   if (!assessment) redirect("/")
 
-  // Authorization
-  if (user.role === "QUALITY_ASSESSOR" && assessment.assessorId !== user.id) redirect("/quality-assessor")
-  if (user.role === "SCHOOL_MANAGER" && assessment.schoolId !== user.schoolId) redirect("/school-manager")
+  // فحص وصول موحد على الخادم — يغلق ثغرتين:
+  // 1) BRANCH_MANAGER كان بلا أي فحص (يمكنه فتح نتائج أي مدرسة)
+  // 2) التقييمات الخاصة (PRIVATE_REVIEW) كانت تظهر لمدير المدرسة
+  const allowed = await assertAssessmentAccess(user, assessment, "read")
+  if (!allowed) redirect("/")
 
   const confirmedGaps = assessment.gaps
 

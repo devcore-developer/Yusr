@@ -1,5 +1,5 @@
 import { prisma } from "@/lib/prisma"
-import { getCurrentUser } from "@/lib/permissions"
+import { getCurrentUser, getAuthorizedBranchIds } from "@/lib/permissions"
 import { Card, CardContent } from "@/components/ui/Card"
 import { Button } from "@/components/ui/Button"
 import { Badge } from "@/components/ui/Badge"
@@ -18,10 +18,21 @@ export default async function AssessorDashboard() {
     return null
   }
 
-  // تحديد النطاق حسب الدور، مع استبعاد التقييمات الخاصة من القائمة العادية
-  const assessorWhere = {
-    ...(user.role === "SUPER_ADMIN" ? {} : { schoolId: user.schoolId! }),
-    type: { not: "PRIVATE_REVIEW" } 
+  // تحديد النطاق حسب الدور — عزل صارم على الخادم:
+  // - QUALITY_ASSESSOR: تقييماته هو فقط (سابقاً كان يرى كل تقييمات المدرسة — ثغرة)
+  // - BRANCH_MANAGER: تقييمات فروعه + تقييماته (سابقاً كان يرى كل المدرسة — ثغرة)
+  // - SCHOOL_MANAGER: تقييمات مدرسته
+  // - SUPER_ADMIN: الجميع
+  // مع استبعاد التقييمات الخاصة من القائمة العادية في كل الأحوال
+  let assessorWhere: Record<string, unknown> = { type: { not: "PRIVATE_REVIEW" } }
+
+  if (user.role === "SCHOOL_MANAGER") {
+    assessorWhere.schoolId = user.schoolId
+  } else if (user.role === "BRANCH_MANAGER") {
+    const authorizedBranchIds = await getAuthorizedBranchIds(user)
+    assessorWhere.OR = [{ branchId: { in: authorizedBranchIds } }, { assessorId: user.id }]
+  } else if (user.role === "QUALITY_ASSESSOR") {
+    assessorWhere.assessorId = user.id
   }
 
   const assessments = await prisma.assessment.findMany({

@@ -169,14 +169,37 @@ export async function createUser(formData: FormData) {
     return { error: "الحقول مطلوبة" }
   }
 
-  // فرض التسلسل الهرمي للصلاحيات (Security Enforcement)
+  let branchIdToAssign: string | null = null
+
+  // فرض التسلسل الهرمي للصلاحيات + عزل النطاق (Security Enforcement)
   if (user.role === "SCHOOL_MANAGER") {
     if (role !== "BRANCH_MANAGER" && role !== "QUALITY_ASSESSOR") {
       return { error: "غير مصرح لك بإنشاء هذا الدور" }
     }
+    // الإصلاح: التحقق أن الفرع المختار يتبع مدرسة مدير المدرسة فعلاً (كان غائباً)
+    const selectedBranchId = formData.get("branchId") as string
+    if (!selectedBranchId) {
+      return { error: "يجب اختيار فرع" }
+    }
+    const branch = await prisma.branch.findFirst({
+      where: { id: selectedBranchId, schoolId: user.schoolId! }
+    })
+    if (!branch) {
+      return { error: "الفرع غير تابع لمدرستك" }
+    }
+    branchIdToAssign = selectedBranchId
   } else if (user.role === "BRANCH_MANAGER") {
     // إجبار الدور ليكون مشرف فقط بغض النظر عما تم إرساله من المتصفح
     role = "QUALITY_ASSESSOR"
+    branchIdToAssign = user.branchId
+    // معالجة الربط المزدوج: لو مدير القسم مرتبط عبر Branch.managerId فقط
+    if (!branchIdToAssign) {
+      const managed = await prisma.branch.findMany({ where: { managerId: user.id }, select: { id: true } })
+      if (managed.length === 1) branchIdToAssign = managed[0].id
+    }
+  } else {
+    // SUPER_ADMIN
+    branchIdToAssign = (formData.get("branchId") as string) || null
   }
 
   const existingUser = await prisma.user.findUnique({ where: { email } })
@@ -194,18 +217,16 @@ export async function createUser(formData: FormData) {
         password: hashedPassword,
         role: role as any,
         schoolId: user.schoolId,
-        // مدير قسم يُربط بفرعه تلقائياً، غيره يُربط حسب الاختيار من القائمة
-        branchId: user.role === "BRANCH_MANAGER" ? user.branchId : (formData.get("branchId") as string || null),
+        branchId: branchIdToAssign,
         status: "ACTIVE"
       }
     })
 
-    // تسجيل النشاط في سجل العمليات
     await prisma.activity.create({
       data: {
         actorId: user.id,
         schoolId: user.schoolId,
-        branchId: user.role === "BRANCH_MANAGER" ? user.branchId : (formData.get("branchId") as string || null),
+        branchId: branchIdToAssign,
         action: "CREATE",
         entityType: "USER",
         entityId: newUser.id,

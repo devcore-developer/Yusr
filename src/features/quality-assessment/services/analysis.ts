@@ -1,155 +1,275 @@
-import { Domain, Indicator } from '@prisma/client'
+import { prisma } from "@/lib/prisma"
+import { getCurrentUser, getAuthorizedBranchIds } from "@/lib/permissions"
 
-export type PerformanceLevel = 0 | 1 | 2 | 3 | 4
-export type PerformanceBand = 'غير مقيم' | 'التهيئة' | 'الانطلاق' | 'التقدم' | 'التميز'
-
-export interface AnalysisResult {
-  totalIndicators: number
-  completedResponses: number
-  presentCount: number
-  notPresentCount: number
-  notApplicableCount: number
-  completionPercentage: number
-  evidenceCoverage: number
-  performanceLevel: PerformanceLevel
-  performanceBand: PerformanceBand
-  domainAnalysis: DomainAnalysis[]
-  potentialGaps: PotentialGap[]
-}
-
-export interface DomainAnalysis {
-  domainId: string
-  domainName: string
-  totalIndicators: number
-  completed: number
-  present: number
-  notPresent: number
-  notApplicable: number
-  completionPercentage: number
-  performanceBand: PerformanceBand
-}
-
-export interface PotentialGap {
-  indicatorId: string
-  indicatorCode: string
-  description: string
-  domainName: string
-  responseId: string
-}
-
-interface ResponseWithEvidence {
+export interface AssessmentScore {
   id: string
-  indicatorId: string
-  value: string
-  notes?: string | null
-  evidence?: { id: string }[]
+  status: string
+  score: number
+  evaluatorId: string
+  evaluatorName: string
+  evaluatorRole: string
+  verifiedCount: number
+  totalEvidence: number
+  branchId?: string | null
+  branchName?: string
 }
 
-// دالة تطبيق قواعد الجودة الرسمية
-// تم تعديلها لتقبل null كقيمة تعني "غير مقيم"
-export function getPerformanceBand(percentage: number | null): PerformanceBand {
-  if (percentage === null) return 'غير مقيم'
-  if (percentage < 50) return 'التهيئة'
-  if (percentage < 75) return 'الانطلاق'
-  if (percentage < 90) return 'التقدم'
-  return 'التميز'
+export interface EvaluatorAnalytics {
+  id: string
+  name: string
+  role: string
+  assessments: AssessmentScore[]
+  provisionalAverage: number | null
+  finalAverage: number | null
 }
 
-export function getPerformanceLevel(percentage: number | null): PerformanceLevel {
-  if (percentage === null) return 0
-  if (percentage < 50) return 1
-  if (percentage < 75) return 2
-  if (percentage < 90) return 3
-  return 4
+export interface BranchAnalytics {
+  provisionalPercentage: number | null
+  finalPercentage: number | null
+  eligibleAssessments: number
+  completedAssessments: number
+  inProgressAssessments: number
+  excludedAssessments: number
+  evaluators: EvaluatorAnalytics[]
+  assessments: AssessmentScore[]
 }
 
-export function analyzeAssessment(
-  domains: (Domain & { axes: { indicators: Indicator[] }[] })[],
-  responses: ResponseWithEvidence[]
-): AnalysisResult {
-  const responseMap = new Map(responses.map(r => [r.indicatorId, r]))
-  
-  let totalIndicators = 0
-  let completedResponses = 0
-  let presentCount = 0
-  let notPresentCount = 0
-  let notApplicableCount = 0
-  let indicatorsWithEvidence = 0
-
-  const domainAnalysis: DomainAnalysis[] = []
-  const potentialGaps: PotentialGap[] = []
-
-  for (const domain of domains) {
-    let dTotal = 0
-    let dCompleted = 0
-    let dPresent = 0
-    let dNotPresent = 0
-    let dNotApplicable = 0
-
-    for (const axis of domain.axes) {
-      for (const ind of axis.indicators) {
-        totalIndicators++
-        dTotal++
-        
-        const res = responseMap.get(ind.id)
-        if (res) {
-          completedResponses++
-          dCompleted++
-          
-          if (res.value === 'PRESENT') { presentCount++; dPresent++ }
-          if (res.value === 'NOT_PRESENT') { 
-            notPresentCount++; dNotPresent++
-            potentialGaps.push({
-              indicatorId: ind.id,
-              indicatorCode: ind.code,
-              description: ind.description,
-              domainName: domain.name,
-              responseId: res.id
-            })
-          }
-          if (res.value === 'NOT_APPLICABLE') { notApplicableCount++; dNotApplicable++ }
-          
-          if (res.evidence && res.evidence.length > 0) {
-            indicatorsWithEvidence++
-          }
-        }
-      }
-    }
-
-    const dCompletion = dTotal > 0 ? Math.round((dCompleted / dTotal) * 100) : 0
-    
-    // إذا لم يتم الإجابة على أي مؤشر في هذا المجال، اعتبره "غير مقيم" (null)
-    const dBandPercentage = dCompleted > 0 ? dCompletion : null
-
-    domainAnalysis.push({
-      domainId: domain.id,
-      domainName: domain.name,
-      totalIndicators: dTotal,
-      completed: dCompleted,
-      present: dPresent,
-      notPresent: dNotPresent,
-      notApplicable: dNotApplicable,
-      completionPercentage: dCompletion,
-      performanceBand: getPerformanceBand(dBandPercentage)
-    })
+export async function getPlatformAnalytics() {
+  // الإصلاح: إحصائيات المنصة الشاملة لمدير النظام فقط
+  const user = await getCurrentUser()
+  if (!user || user.role !== "SUPER_ADMIN") {
+    throw new Error("Forbidden")
   }
 
-  const completionPercentage = totalIndicators > 0 ? Math.round((completedResponses / totalIndicators) * 100) : 0
-  
-  // النسبة العامة للتقييم: إذا لم تتم الإجابة على أي مؤشر، اعتبر التقييم "غير مقيم"
-  const overallBandPercentage = completedResponses > 0 ? completionPercentage : null
+  const [schools, branches, assessments, gaps, totalEvidence, verifiedEvidence] = await Promise.all([
+    prisma.school.count(),
+    prisma.branch.count(),
+    prisma.assessment.findMany({ include: { school: true, branch: true, _count: { select: { gaps: true } } }, orderBy: { startedAt: "desc" }, take: 10 }),
+    prisma.gap.findMany({ include: { school: true, branch: true, indicator: true } }),
+    prisma.fixedEvidence.count(),
+    prisma.evidenceResponse.count({ where: { isVerified: true } })
+  ])
+
+  const responseCoverage = totalEvidence > 0 ? Math.round((verifiedEvidence / totalEvidence) * 100) : 0
 
   return {
-    totalIndicators,
-    completedResponses,
-    presentCount,
-    notPresentCount,
-    notApplicableCount,
-    completionPercentage,
-    evidenceCoverage: completedResponses > 0 ? Math.round((indicatorsWithEvidence / completedResponses) * 100) : 0,
-    performanceLevel: getPerformanceLevel(overallBandPercentage),
-    performanceBand: getPerformanceBand(overallBandPercentage),
-    domainAnalysis,
-    potentialGaps
+    schools,
+    branches,
+    activeAssessments: assessments.filter(a => a.status === "IN_PROGRESS").length,
+    completedAssessments: assessments.filter(a => a.status === "COMPLETED").length,
+    recentAssessments: assessments,
+    totalGaps: gaps.length,
+    openGaps: gaps.filter(g => g.status === "OPEN").length,
+    presentCount: verifiedEvidence,
+    notPresentCount: gaps.length,
+    responseCoverage
   }
+}
+
+export async function getSchoolAnalytics(schoolId: string): Promise<BranchAnalytics> {
+  // الإصلاح: تحليلات المدرسة (تتضمن أسماء المقيّمين ونتائجهم) لمدير المدرسة أو مدير النظام فقط
+  const user = await getCurrentUser()
+  if (!user) throw new Error("Unauthorized")
+  if (user.role !== "SUPER_ADMIN" && !(user.role === "SCHOOL_MANAGER" && user.schoolId === schoolId)) {
+    throw new Error("Forbidden")
+  }
+
+  const totalEvidence = await prisma.fixedEvidence.count()
+  const assessments = await prisma.assessment.findMany({
+    where: { schoolId, type: "NORMAL", status: { in: ["IN_PROGRESS", "COMPLETED"] } },
+    include: {
+      assessor: { select: { id: true, name: true, role: true } },
+      branch: { select: { id: true, name: true } },
+      evidenceResponses: { where: { isVerified: true } }
+    }
+  })
+
+  const excludedAssessments = await prisma.assessment.count({
+    where: { schoolId, OR: [ { type: "PRIVATE_REVIEW" }, { status: "NOT_STARTED" } ] }
+  })
+
+  if (assessments.length === 0) {
+    return {
+      provisionalPercentage: null,
+      finalPercentage: null,
+      eligibleAssessments: 0,
+      completedAssessments: 0,
+      inProgressAssessments: 0,
+      excludedAssessments,
+      evaluators: [],
+      assessments: []
+    }
+  }
+
+  const mapped: AssessmentScore[] = assessments.map(a => ({
+    id: a.id,
+    status: a.status,
+    score: totalEvidence > 0 ? Math.round((a.evidenceResponses.length / totalEvidence) * 100) : 0,
+    evaluatorId: a.assessor?.id ?? "unknown",
+    evaluatorName: a.assessor?.name ?? "غير محدد",
+    evaluatorRole: a.assessor?.role ?? "غير محدد",
+    verifiedCount: a.evidenceResponses.length,
+    totalEvidence,
+    branchId: a.branchId,
+    branchName: a.branch?.name || "كامل المدرسة"
+  }))
+
+  const provisionalPercentage = mapped.length > 0
+    ? Math.round((mapped.reduce((sum, a) => sum + a.score, 0) / mapped.length) * 10) / 10
+    : null
+
+  const completed = mapped.filter(a => a.status === "COMPLETED")
+  const finalPercentage = completed.length > 0
+    ? Math.round((completed.reduce((sum, a) => sum + a.score, 0) / completed.length) * 10) / 10
+    : null
+
+  const evaluatorMap = new Map<string, EvaluatorAnalytics>()
+  for (const a of mapped) {
+    if (!evaluatorMap.has(a.evaluatorId)) {
+      evaluatorMap.set(a.evaluatorId, {
+        id: a.evaluatorId,
+        name: a.evaluatorName,
+        role: a.evaluatorRole,
+        assessments: [],
+        provisionalAverage: 0,
+        finalAverage: null
+      })
+    }
+    evaluatorMap.get(a.evaluatorId)!.assessments.push(a)
+  }
+
+  const evaluators: EvaluatorAnalytics[] = Array.from(evaluatorMap.values()).map(ev => {
+    const evCompleted = ev.assessments.filter(a => a.status === "COMPLETED")
+    ev.provisionalAverage = ev.assessments.length > 0
+      ? Math.round((ev.assessments.reduce((sum, a) => sum + a.score, 0) / ev.assessments.length) * 10) / 10
+      : null
+    ev.finalAverage = evCompleted.length > 0
+      ? Math.round((evCompleted.reduce((sum, a) => sum + a.score, 0) / evCompleted.length) * 10) / 10
+      : null
+    return ev
+  })
+
+  return {
+    provisionalPercentage,
+    finalPercentage,
+    eligibleAssessments: mapped.length,
+    completedAssessments: completed.length,
+    inProgressAssessments: mapped.length - completed.length,
+    excludedAssessments,
+    evaluators,
+    assessments: mapped
+  }
+}
+
+export async function getBranchAnalytics(branchId: string): Promise<BranchAnalytics> {
+  // الإصلاح: تحليلات الفرع لمدير القسم (فرعه) أو مدير المدرسة (فروع مدرسته) أو مدير النظام فقط
+  const user = await getCurrentUser()
+  if (!user) throw new Error("Unauthorized")
+
+  if (user.role !== "SUPER_ADMIN") {
+    if (user.role === "SCHOOL_MANAGER") {
+      const branch = await prisma.branch.findUnique({
+        where: { id: branchId },
+        select: { schoolId: true }
+      })
+      if (!branch || branch.schoolId !== user.schoolId) throw new Error("Forbidden")
+    } else if (user.role === "BRANCH_MANAGER") {
+      const authorizedBranchIds = await getAuthorizedBranchIds(user)
+      if (!authorizedBranchIds.includes(branchId)) throw new Error("Forbidden")
+    } else {
+      // QUALITY_ASSESSOR وأي دور آخر: تحليلات الفرع تتضمن أداء باقي المقيّمين — ممنوعة
+      throw new Error("Forbidden")
+    }
+  }
+
+  const totalEvidence = await prisma.fixedEvidence.count()
+  const assessments = await prisma.assessment.findMany({
+    where: { branchId, type: "NORMAL", status: { in: ["IN_PROGRESS", "COMPLETED"] } },
+    include: {
+      assessor: { select: { id: true, name: true, role: true } },
+      evidenceResponses: { where: { isVerified: true } }
+    }
+  })
+
+  const excludedAssessments = await prisma.assessment.count({
+    where: { branchId, OR: [ { type: "PRIVATE_REVIEW" }, { status: "NOT_STARTED" } ] }
+  })
+
+  if (assessments.length === 0) {
+    return {
+      provisionalPercentage: null,
+      finalPercentage: null,
+      eligibleAssessments: 0,
+      completedAssessments: 0,
+      inProgressAssessments: 0,
+      excludedAssessments,
+      evaluators: [],
+      assessments: []
+    }
+  }
+
+  const mapped: AssessmentScore[] = assessments.map(a => ({
+    id: a.id,
+    status: a.status,
+    score: totalEvidence > 0 ? Math.round((a.evidenceResponses.length / totalEvidence) * 100) : 0,
+    evaluatorId: a.assessor?.id ?? "unknown",
+    evaluatorName: a.assessor?.name ?? "غير محدد",
+    evaluatorRole: a.assessor?.role ?? "غير محدد",
+    verifiedCount: a.evidenceResponses.length,
+    totalEvidence
+  }))
+
+  const provisionalPercentage = mapped.length > 0
+    ? Math.round((mapped.reduce((sum, a) => sum + a.score, 0) / mapped.length) * 10) / 10
+    : null
+
+  const completed = mapped.filter(a => a.status === "COMPLETED")
+  const finalPercentage = completed.length > 0
+    ? Math.round((completed.reduce((sum, a) => sum + a.score, 0) / completed.length) * 10) / 10
+    : null
+
+  const evaluatorMap = new Map<string, EvaluatorAnalytics>()
+  for (const a of mapped) {
+    if (!evaluatorMap.has(a.evaluatorId)) {
+      evaluatorMap.set(a.evaluatorId, {
+        id: a.evaluatorId,
+        name: a.evaluatorName,
+        role: a.evaluatorRole,
+        assessments: [],
+        provisionalAverage: 0,
+        finalAverage: null
+      })
+    }
+    evaluatorMap.get(a.evaluatorId)!.assessments.push(a)
+  }
+
+  const evaluators: EvaluatorAnalytics[] = Array.from(evaluatorMap.values()).map(ev => {
+    const evCompleted = ev.assessments.filter(a => a.status === "COMPLETED")
+    ev.provisionalAverage = ev.assessments.length > 0
+      ? Math.round((ev.assessments.reduce((sum, a) => sum + a.score, 0) / ev.assessments.length) * 10) / 10
+      : null
+    ev.finalAverage = evCompleted.length > 0
+      ? Math.round((evCompleted.reduce((sum, a) => sum + a.score, 0) / evCompleted.length) * 10) / 10
+      : null
+    return ev
+  })
+
+  return {
+    provisionalPercentage,
+    finalPercentage,
+    eligibleAssessments: mapped.length,
+    completedAssessments: completed.length,
+    inProgressAssessments: mapped.length - completed.length,
+    excludedAssessments,
+    evaluators,
+    assessments: mapped
+  }
+}
+// فئات الأداء المعتمدة — مطابقة لحدود الشارات المستخدمة في صفحات التقارير (90 / 75 / 50)
+export function getPerformanceBand(score: number | null): string {
+  if (score === null || Number.isNaN(score)) return "غير مقيم"
+  if (score >= 90) return "ممتاز"
+  if (score >= 75) return "جيد جدًا"
+  if (score >= 50) return "مقبول"
+  return "ضعيف"
 }

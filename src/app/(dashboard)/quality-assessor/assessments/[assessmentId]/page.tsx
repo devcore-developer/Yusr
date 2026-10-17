@@ -1,5 +1,5 @@
 import { prisma } from "@/lib/prisma"
-import { getCurrentUser } from "@/lib/permissions"
+import { getCurrentUser, assertAssessmentAccess } from "@/lib/permissions"
 import { redirect } from "next/navigation"
 import { PageHeader } from "@/components/layout/PageHeader"
 import { AssessmentEngine } from "@/features/quality-assessment/components/AssessmentEngine"
@@ -26,15 +26,10 @@ export default async function AssessmentPage({ params }: { params: { assessmentI
 
   if (!assessment) redirect("/quality-assessor")
 
-  if (user.role === "SUPER_ADMIN") {
-    // Allowed
-  } else if (user.role === "SCHOOL_MANAGER") {
-    if (assessment.schoolId !== user.schoolId) redirect("/quality-assessor")
-  } else if (user.role === "BRANCH_MANAGER") {
-    if (assessment.branchId !== user.branchId) redirect("/quality-assessor")
-  } else if (assessment.assessorId !== user.id) {
-    redirect("/quality-assessor")
-  }
+  // فحص وصول موحد على الخادم: ملكية المقيّم + نطاق المدرسة/الفرع + عزل التقييمات الخاصة
+  // (سابقاً: المقيّم لم يكن مقيّداً إلا بالملكية — وهذا سليم — لكن الفحص الآن موحد ومركزي)
+  const allowed = await assertAssessmentAccess(user, assessment, "read")
+  if (!allowed) redirect("/quality-assessor")
 
   const domains = await prisma.domain.findMany({
     include: { 
@@ -73,7 +68,7 @@ export default async function AssessmentPage({ params }: { params: { assessmentI
         initialNotesResponses={JSON.parse(JSON.stringify(assessment.responses))}
         initialAttachments={JSON.parse(JSON.stringify(assessment.attachments))}
         userRole={user.role}
-        userId={user.id} // أضف هذا السطر
+        userId={user.id}
       />
     </div>
   )

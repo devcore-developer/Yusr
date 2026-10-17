@@ -1,5 +1,7 @@
 import { prisma } from "@/lib/prisma"
-import { getCurrentUser } from "@/lib/permissions"
+import { Prisma } from "@prisma/client"
+import { getCurrentUser, getAuthorizedBranchIds } from "@/lib/permissions"
+import { redirect } from "next/navigation"
 import { PageHeader } from "@/components/layout/PageHeader"
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/Card"
 import { Button } from "@/components/ui/Button"
@@ -16,21 +18,63 @@ const roleConfig: Record<string, { label: string; variant: "danger" | "info" | "
   QUALITY_ASSESSOR: { label: "مشرف", variant: "amber" },
 }
 
+const userSelect = {
+  id: true,
+  name: true,
+  email: true,
+  role: true,
+  status: true,
+  createdAt: true,
+  school: { select: { name: true } },
+  branch: { select: { id: true, name: true } },
+  activities: {
+    take: 5,
+    orderBy: { createdAt: "desc" as const },
+    select: { id: true, action: true, entityType: true, createdAt: true },
+  },
+} satisfies Prisma.UserSelect
+
+type TargetUser = Prisma.UserGetPayload<{ select: typeof userSelect }>
+
 export default async function UserDetailsPage({ params }: { params: { userId: string } }) {
   const user = await getCurrentUser()
-  if (!user?.schoolId) return null
+  if (!user) redirect("/login")
 
-  const targetUser = await prisma.user.findUnique({
-    where: { id: params.userId },
-    select: {
-      id: true, name: true, email: true, role: true, status: true, createdAt: true,
-      school: { select: { name: true } },
-      branch: { select: { id: true, name: true } },
-      activities: { take: 5, orderBy: { createdAt: "desc" }, select: { id: true, action: true, entityType: true, createdAt: true } },
-    },
-  })
+  // عزل النطاق على الخادم: كل دور يرى ملفات مستخدمي نطاقه فقط
+  // (سابقاً كانت الصفحة مكشوفة لأي مستخدم مسجّل الدخول عبر تغيير الرابط)
+  let targetUser: TargetUser | null = null
 
-  if (!targetUser || targetUser.school?.name === null) {
+  if (user.role === "SUPER_ADMIN") {
+    targetUser = await prisma.user.findUnique({
+      where: { id: params.userId },
+      select: userSelect,
+    })
+  } else if (user.role === "SCHOOL_MANAGER" && user.schoolId) {
+    targetUser = await prisma.user.findFirst({
+      where: { AND: [{ id: params.userId }, { schoolId: user.schoolId }] },
+      select: userSelect,
+    })
+  } else if (user.role === "BRANCH_MANAGER") {
+    const authorizedBranchIds = await getAuthorizedBranchIds(user)
+    targetUser = await prisma.user.findFirst({
+      where: {
+        AND: [
+          { id: params.userId },
+          { schoolId: user.schoolId ?? undefined },
+          { OR: [{ branchId: { in: authorizedBranchIds } }, { id: user.id }] },
+        ],
+      },
+      select: userSelect,
+    })
+  } else {
+    // QUALITY_ASSESSOR وأي دور آخر: ملفه هو فقط
+    targetUser = await prisma.user.findFirst({
+      where: { AND: [{ id: params.userId }, { id: user.id }] },
+      select: userSelect,
+    })
+  }
+
+  if (!targetUser) {
     return (
       <div className="flex flex-col items-center justify-center py-20">
         <h1 className="text-xl font-semibold text-foreground">المستخدم غير موجود</h1>
