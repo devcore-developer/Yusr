@@ -1,9 +1,14 @@
+// ===== FILE: src/app/(school-manager)/school-manager/users/actions.ts =====
 "use server"
 
 import { prisma } from "@/lib/prisma"
-import { getCurrentUser } from "@/lib/permissions"
+import { getCurrentUser, getUserStageGrant } from "@/lib/permissions"
+import { normalizeStageIds, getStageLabel, type EducationalStageId } from "@/lib/stages"
 import { revalidatePath } from "next/cache"
 import bcrypt from "bcryptjs"
+
+// الأدوار التي تدعم تعيين مراحل تعليمية متعدد (§2 من متطلبات الميزة)
+const STAGE_ASSIGNABLE_ROLES = ["BRANCH_MANAGER", "QUALITY_ASSESSOR"]
 
 async function verifyConfirmation(password: string, confirmPhrase: string, actionType: "DELETE_SCHOOL" | "DELETE_USER") {
   const user = await getCurrentUser()
@@ -207,6 +212,27 @@ export async function createUser(formData: FormData) {
     return { error: "البريد الإلكتروني مستخدم بالفعل" }
   }
 
+  // ===== المراحل التعليمية (§2): تعيين متعدد لمديري الأقسام والمقيّمين فقط =====
+  // يُطبَّع على الخادم (لا ثقة بالعميل) + قيد المصدر: مدير القسم لا يمنح إلا مما عُيّن عليه.
+  let assignedStages: EducationalStageId[] = []
+  if (STAGE_ASSIGNABLE_ROLES.includes(role)) {
+    let stages: EducationalStageId[]
+    try {
+      stages = normalizeStageIds(formData.getAll("stages"))
+    } catch (e) {
+      return { error: e instanceof Error ? e.message : "المراحل التعليمية المحددة غير صحيحة." }
+    }
+    const grant = getUserStageGrant(user)
+    if (grant.mode === "LIMITED") {
+      const allowed = new Set(grant.stages)
+      const illegal = stages.filter(s => !allowed.has(s))
+      if (illegal.length > 0) {
+        return { error: `لا يمكنك منح مراحل غير معينة عليك: ${illegal.map(s => getStageLabel(s)).join("، ")}` }
+      }
+    }
+    assignedStages = stages
+  }
+
   try {
     const hashedPassword = await bcrypt.hash(password, 10)
 
@@ -218,7 +244,8 @@ export async function createUser(formData: FormData) {
         role: role as any,
         schoolId: user.schoolId,
         branchId: branchIdToAssign,
-        status: "ACTIVE"
+        status: "ACTIVE",
+        stages: assignedStages
       }
     })
 
@@ -230,7 +257,7 @@ export async function createUser(formData: FormData) {
         action: "CREATE",
         entityType: "USER",
         entityId: newUser.id,
-        metadata: { name: newUser.name, email: newUser.email, role: newUser.role }
+        metadata: { name: newUser.name, email: newUser.email, role: newUser.role, stages: assignedStages }
       }
     })
 

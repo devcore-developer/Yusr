@@ -4,29 +4,41 @@ import { redirect } from "next/navigation"
 import { compareAssessments } from "@/features/quality-assessment/services/aggregation"
 import { PrintButton } from "@/components/reports/PrintButton"
 
-export default async function PrintComparisonPage({ searchParams }: { searchParams: { ids: string } }) {
+export default async function PrintComparisonPage({ searchParams }: { searchParams: { ids?: string } }) {
   const user = await getCurrentUser()
   if (!user) redirect("/login")
 
-  const assessmentIds = searchParams.ids.split(",").filter(Boolean)
+  // تحليل آمن لمعامل الرابط: تجاهل القيم الفارغة + إزالة التكرار
+  // (منع عدّ التقييم الواحد مرتين داخل نفس المقارنة)
+  const idsParam = typeof searchParams.ids === "string" ? searchParams.ids : ""
+  const assessmentIds = Array.from(new Set(idsParam.split(",").map(s => s.trim()).filter(Boolean)))
   if (assessmentIds.length < 2) {
-    redirect("/quality-assessor")
+    redirect("/reports")
   }
 
-  // Authorization check
+  // فحص الملكية والنطاق قبل أي استعلام تجميعي — فشل مغلق (deny-by-default):
+  // مدير النظام: كل التقييمات | مدير المدرسة: مدرسته فقط | مدير الفرع: فرعه فقط
+  // مقيّم الجودة: تقييماته هو فقط (assessorId) | أي دور آخر: ممنوع
   const assessments = await prisma.assessment.findMany({
     where: { id: { in: assessmentIds } },
-    select: { schoolId: true, branchId: true }
+    select: { id: true, schoolId: true, branchId: true, assessorId: true }
   })
+
+  // تقييم مطلوب غير موجود أصلًا = معامل رابط غير صالح
+  if (assessments.length !== assessmentIds.length) {
+    redirect("/reports")
+  }
 
   if (user.role !== "SUPER_ADMIN") {
     const hasUnauthorized = assessments.some(a => {
       if (user.role === "SCHOOL_MANAGER") return a.schoolId !== user.schoolId
       if (user.role === "BRANCH_MANAGER") return a.branchId !== user.branchId
-      return false
+      if (user.role === "QUALITY_ASSESSOR") return a.assessorId !== user.id
+      return true // أي دور آخر: ممنوع (النسخة السابقة كانت تسمح صامتة بسبب return false)
     })
-    if (hasUnauthorized) redirect("/quality-assessor")
+    if (hasUnauthorized) redirect("/reports")
   }
+  // ملاحظة: compareAssessments تفرض checkAssessmentAccess على كل تقييم على حدة (دفاع في العمق)
 
   const result = await compareAssessments(assessmentIds)
 
@@ -62,7 +74,7 @@ export default async function PrintComparisonPage({ searchParams }: { searchPara
       <div className="report-header">
         <h1 className="text-2xl font-bold text-[#0C3740]">تقرير مقارنة التقييمات</h1>
         <p className="text-sm text-gray-600 mt-1">
-          تاريخ التقرير: {new Date().toLocaleDateString('ar-SA')} | 
+          تاريخ التقرير: {new Date().toLocaleDateString('ar-SA')} |
           عدد التقييمات: {result.assessments.length}
         </p>
       </div>
@@ -85,8 +97,8 @@ export default async function PrintComparisonPage({ searchParams }: { searchPara
             <tr key={a.id}>
               <td>{a.assessorName}</td>
               <td>
-                {a.assessorRole === "QUALITY_ASSESSOR" ? "مشرف" : 
-                 a.assessorRole === "SCHOOL_MANAGER" ? "مدير عام" : 
+                {a.assessorRole === "QUALITY_ASSESSOR" ? "مشرف" :
+                 a.assessorRole === "SCHOOL_MANAGER" ? "مدير عام" :
                  a.assessorRole === "BRANCH_MANAGER" ? "مدير قسم" : a.assessorRole}
               </td>
               <td>{a.schoolName}</td>
@@ -191,8 +203,8 @@ export default async function PrintComparisonPage({ searchParams }: { searchPara
 
       {/* Legend */}
       <div className="mt-6 text-xs text-gray-500">
-        <p><span className="text-success">✓</span> متفق عليها &nbsp;|&nbsp; 
-           <span className="text-danger">✗</span> مختلف عليها &nbsp;|&nbsp; 
+        <p><span className="text-success">✓</span> متفق عليها &nbsp;|&nbsp;
+           <span className="text-danger">✗</span> مختلف عليها &nbsp;|&nbsp;
            <span className="text-warning">⚠</span> لم يُقيّم من الجميع</p>
       </div>
     </div>

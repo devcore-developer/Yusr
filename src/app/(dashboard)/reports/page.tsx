@@ -1,3 +1,4 @@
+// ===== FILE: src/app/(dashboard)/reports/page.tsx =====
 import { prisma } from "@/lib/prisma"
 import { getCurrentUser } from "@/lib/permissions"
 import { redirect } from "next/navigation"
@@ -9,22 +10,77 @@ import { Progress } from "@/components/ui/Progress"
 import Link from "next/link"
 import Image from "next/image"
 import { getPerformanceBand } from "@/features/quality-assessment/services/analysis"
+import { formatDate } from "@/lib/utils"
+import { EDUCATIONAL_STAGES, getStageLabel, stageFilterToParam, type StageFilterValue } from "@/lib/stages"
+import {
+  resolveReportFilters,
+  buildReportFilterWhere,
+  reportFiltersToParams,
+  reportFiltersToQueryString,
+  type AssessmentStatusFilter,
+} from "@/features/quality-reports/services/report-filters"
+import { countDistinctVerifiedEvidence } from "@/features/quality-reports/services/weighted-score"
+import { ReportFiltersBar } from "@/components/reports/ReportFiltersBar"
+import { WeightedEvaluationSection } from "@/components/reports/WeightedEvaluationSection"
+
+// ============================================================
+// فلتر المرحلة التعليمية (§6):
+//  - undefined = كل المراحل (السلوك الافتراضي — لا تغيير على التقرير الحالي)
+//  - null = السجلات التاريخية غير المحددة (stage IS NULL)
+//  - EducationalStageId = مرحلة واحدة
+// الفلتر يُطبق AND على استعلامات الخادم في كل الأقسام — لا يوسع أي نطاق.
+// منهجية الحساب لم تتغير إطلاقًا: درجة كل تقييم من استجاباته هو فقط.
+// ============================================================
+
+function StageFilterBar({ current }: { current: StageFilterValue | undefined }) {
+  const options: { value: string; label: string }[] = [
+    { value: "", label: "كل المراحل" },
+    ...EDUCATIONAL_STAGES.map(s => ({ value: s.id, label: s.ar })),
+    { value: "UNSPECIFIED", label: "غير محددة" },
+  ]
+  return (
+    <Card className="p-4">
+      <div className="flex flex-wrap items-center gap-2 min-w-0">
+        <span className="text-[13px] font-medium text-muted-foreground">المرحلة التعليمية:</span>
+        {options.map(o => {
+          const isActive =
+            o.value === "" ? current === undefined : o.value === "UNSPECIFIED" ? current === null : current === o.value
+          return (
+            <Link
+              key={o.value || "all"}
+              href={o.value ? `/reports?stage=${o.value}` : "/reports"}
+              className={`px-3 py-1.5 rounded-full text-[12px] font-medium border transition-smooth whitespace-nowrap ${
+                isActive
+                  ? "bg-primary text-white border-primary"
+                  : "bg-surface-muted text-muted-foreground border-border hover:border-primary/60"
+              }`}
+            >
+              {o.label}
+            </Link>
+          )
+        })}
+      </div>
+    </Card>
+  )
+}
 
 // Shared calculation function for branch performance
-async function calculateBranchPerformance(branchId: string) {
-  const totalEvidence = await prisma.fixedEvidence.count()
+async function calculateBranchPerformance(branchId: string, stageFilter?: StageFilterValue) {
   
   const assessments = await prisma.assessment.findMany({
     where: {
       branchId,
       type: { not: "PRIVATE_REVIEW" },
-      status: "COMPLETED"
+      status: "COMPLETED",
+      // فلتر المرحلة (undefined = بلا فلتر / null = غير محددة / قيمة = مرحلة)
+      ...(stageFilter !== undefined ? { stage: stageFilter } : {})
     },
     include: {
       assessor: { select: { id: true, name: true, role: true } },
-      evidenceResponses: { where: { isVerified: true } }
+      evidenceResponses: { where: { isVerified: true }, select: { evidenceId: true } }
     }
   })
+  const totalEvidence = await prisma.fixedEvidence.count()
 
   if (assessments.length === 0) {
     return {
@@ -37,7 +93,9 @@ async function calculateBranchPerformance(branchId: string) {
   }
 
   const assessmentScores = assessments.map(a => {
-    const verified = a.evidenceResponses.length
+    // (إصلاح التضخم) المتحقق = شواهد مميزة لا صفوف استجابات — زيارات الملاحظة الصفية
+    // لنفس الشاهد لا تُعدّ أكثر من مرة فلا تتخطى نسبة أي تقييم 100% أصلًا
+    const verified = countDistinctVerifiedEvidence(a.evidenceResponses)
     return {
       id: a.id,
       assessorId: a.assessor?.id ?? "unknown",
@@ -45,7 +103,11 @@ async function calculateBranchPerformance(branchId: string) {
       assessorRole: a.assessor?.role ?? "غير محدد",
       score: totalEvidence > 0 ? Math.round((verified / totalEvidence) * 100) : 0,
       verifiedCount: verified,
-      totalEvidence
+      totalEvidence,
+      // (§2) كل مدخل تقييم منفصل يحمل تاريخه الخاص
+      startedAt: a.startedAt,
+      // (§6) مرحلة هذا التقييم تُعرض مع مدخله — كل تقييم لمرحلة واحدة
+      stage: a.stage
     }
   })
 
@@ -85,20 +147,22 @@ async function calculateBranchPerformance(branchId: string) {
 }
 
 // Shared calculation for school performance
-async function calculateSchoolPerformance(schoolId: string) {
-  const totalEvidence = await prisma.fixedEvidence.count()
-  
+async function calculateSchoolPerformance(schoolId: string, stageFilter?: StageFilterValue) {
   const assessments = await prisma.assessment.findMany({
     where: {
       schoolId,
       type: { not: "PRIVATE_REVIEW" },
-      status: "COMPLETED"
+      status: "COMPLETED",
+      // فلتر المرحلة — نفس دلالات دالة الفرع
+      ...(stageFilter !== undefined ? { stage: stageFilter } : {})
     },
     include: {
       assessor: { select: { id: true, name: true, role: true } },
-      evidenceResponses: { where: { isVerified: true } }
+      branch: { select: { id: true, name: true } },
+      evidenceResponses: { where: { isVerified: true }, select: { evidenceId: true } }
     }
   })
+  const totalEvidence = await prisma.fixedEvidence.count()
 
   if (assessments.length === 0) {
     return {
@@ -111,7 +175,9 @@ async function calculateSchoolPerformance(schoolId: string) {
   }
 
   const assessmentScores = assessments.map(a => {
-    const verified = a.evidenceResponses.length
+    // (إصلاح التضخم) المتحقق = شواهد مميزة لا صفوف استجابات — زيارات الملاحظة الصفية
+    // لنفس الشاهد لا تُعدّ أكثر من مرة فلا تتخطى نسبة أي تقييم 100% أصلًا
+    const verified = countDistinctVerifiedEvidence(a.evidenceResponses)
     return {
       id: a.id,
       assessorId: a.assessor?.id ?? "unknown",
@@ -119,7 +185,12 @@ async function calculateSchoolPerformance(schoolId: string) {
       assessorRole: a.assessor?.role ?? "غير محدد",
       score: totalEvidence > 0 ? Math.round((verified / totalEvidence) * 100) : 0,
       verifiedCount: verified,
-      totalEvidence
+      totalEvidence,
+      // (§2) كل مدخل تقييم منفصل يحمل تاريخه وفرعه الخاصين
+      startedAt: a.startedAt,
+      branchName: a.branch?.name || "كامل المدرسة",
+      // (§6) مرحلة هذا التقييم
+      stage: a.stage
     }
   })
 
@@ -170,20 +241,32 @@ export default async function ReportsPage({
   const isBranchManager = user.role === "BRANCH_MANAGER"
   const isQualityAssessor = user.role === "QUALITY_ASSESSOR"
 
+  // (§3) فلاتر سجل التقارير من الرابط — تُدمج AND على استعلامات القوائم أدناه
+  // ولا توسع نطاق الدور إطلاقًا (النطاق يُشتق من المستخدم الموثق في كل قسم)
+  const filters = resolveReportFilters(searchParams)
+  const stageFilter = filters.stage
+  const stageParam = stageFilterToParam(stageFilter)
+  const filterParams = reportFiltersToParams(filters)
+  const filtersQs = reportFiltersToQueryString(filters)
+  const filtersQsSuffix = filtersQs ? `&${filtersQs}` : ""
+  const filterHiddenInputs = Object.entries(filterParams).map(([k, v]) => (
+    <input key={k} type="hidden" name={k} value={v} />
+  ))
+
   // === 1. Super Admin: School comparison ===
   if (isSuperAdmin) {
     const schools = await prisma.school.findMany({
       include: { 
         _count: { select: { branches: true } },
         assessments: { 
-          where: { type: { not: "PRIVATE_REVIEW" }, status: "COMPLETED" },
+          where: { type: { not: "PRIVATE_REVIEW" }, status: "COMPLETED", ...(stageFilter !== undefined ? { stage: stageFilter } : {}) },
           include: { assessor: true }
         }
       }
     })
 
     const schoolStats = await Promise.all(schools.map(async s => {
-      const perf = await calculateSchoolPerformance(s.id)
+      const perf = await calculateSchoolPerformance(s.id, stageFilter)
       return { 
         ...s, 
         completed: perf.assessmentCount,
@@ -194,6 +277,42 @@ export default async function ReportsPage({
       }
     }))
 
+    // (§3) قائمة التقارير المطابقة للفلاتر — مدير النظام ينتقي مدرسة/مقيّمًا/مرحلة/عامًا/فترة/حالة
+    // ويفتح تقرير التقييم المحدد — كل صف يحمل معرّفاته الكاملة (§2)
+    // الحالة: «حسب الافتراضي» (بلا معامل) = COMPLETED كما كان — و«الكل» الصريح يلغي قيد
+    // الحالة نهائيًا (listStatus !== "ALL" أدناه) بدل دفنه في COMPLETED — نوع التصفية
+    // AssessmentStatusFilter من وحدة الفلاتر نفسها حتى يقبل مقارنة "ALL" ترجمةً ودلالةً.
+    const listStatus: AssessmentStatusFilter =
+      filters.status === "IN_PROGRESS" || filters.status === "ALL" ? filters.status : "COMPLETED"
+    const [saList, saAssessorRows, saYears, saTotalEvidence] = await Promise.all([
+      prisma.assessment.findMany({
+        where: {
+          type: { not: "PRIVATE_REVIEW" },
+          ...buildReportFilterWhere(filters),
+          ...(listStatus !== "ALL" ? { status: listStatus } : {}),
+        },
+        include: {
+          school: { select: { id: true, name: true } },
+          branch: { select: { id: true, name: true } },
+          assessor: { select: { id: true, name: true, role: true } },
+          academicYear: { select: { id: true, label: true } },
+          evidenceResponses: { where: { isVerified: true }, select: { evidenceId: true } },
+        },
+        orderBy: { startedAt: "desc" },
+        take: 200,
+      }),
+      prisma.assessment.findMany({
+        where: { type: { not: "PRIVATE_REVIEW" } },
+        select: { assessor: { select: { id: true, name: true } } },
+        distinct: ["assessorId"],
+      }),
+      prisma.academicYear.findMany({ select: { id: true, label: true }, orderBy: { startYear: "desc" } }),
+      prisma.fixedEvidence.count(),
+    ])
+    const saAssessors = Array.from(
+      new Map(saAssessorRows.filter(r => r.assessor?.id).map(r => [r.assessor!.id, r.assessor!.name || "غير محدد"]))
+    ).map(([id, name]) => ({ id, name }))
+
     return (
       <div className="space-y-6">
         <PageHeader
@@ -201,6 +320,79 @@ export default async function ReportsPage({
           description="مقارنة أداء المدارس المسجلة ونسب إكمال التقييمات."
           breadcrumbs={[{ label: 'الرئيسية', href: '/' }, { label: 'التقارير' }]}
         />
+
+        <StageFilterBar current={stageFilter} />
+
+        {/* (§3) شريط فلاتر سجل التقارير — مدير النظام: مدرسة + مقيّم + عام + فترة + حالة */}
+        <ReportFiltersBar
+          schools={schools.map(s => ({ id: s.id, name: s.name }))}
+          assessors={saAssessors}
+          years={saYears.map(y => ({ id: y.id, label: y.label }))}
+          stageParam={stageParam}
+          current={{
+            schoolId: filters.schoolId,
+            assessorId: filters.assessorId,
+            yearParam: filterParams.year,
+            from: filterParams.from,
+            to: filterParams.to,
+            status: filters.status,
+          }}
+        />
+
+        {/* (§2+§3) سجل التقارير المطابقة للفلاتر — كل صف تقييم مستقل بمعرّفاته الكاملة
+            (المدرسة/الفرع/المقيّم/المرحلة/العام/التاريخ/الحالة/النتيجة) — بلا دمج بين السجلات */}
+        <Card className="overflow-hidden hidden md:block">
+          <CardContent className="p-0">
+            <div className="p-6 pb-0"><h3 className="font-bold">سجل التقارير المطابقة للفلاتر</h3>
+              <p className="text-[12px] text-muted-foreground mt-1">كل صف = تقييم واحد مستقل. النتيجة نسبة تحقق الشواهد لهذا التقييم وحده.</p></div>
+            <table className="w-full text-sm text-right min-w-[900px]">
+              <thead className="text-[12px] text-muted-foreground bg-surface-muted uppercase">
+                <tr>
+                  <th className="px-4 py-3 font-medium">المدرسة</th>
+                  <th className="px-4 py-3 font-medium">الفرع</th>
+                  <th className="px-4 py-3 font-medium">المقيّم</th>
+                  <th className="px-4 py-3 font-medium">المرحلة</th>
+                  <th className="px-4 py-3 font-medium">العام الدراسي</th>
+                  <th className="px-4 py-3 font-medium">التاريخ</th>
+                  <th className="px-4 py-3 font-medium">الحالة</th>
+                  <th className="px-4 py-3 font-medium">النتيجة</th>
+                  <th className="px-4 py-3 font-medium text-left">إجراء</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-border">
+                {saList.map(a => {
+                  const verified = countDistinctVerifiedEvidence(a.evidenceResponses)
+                  const score = saTotalEvidence > 0 ? Math.round((verified / saTotalEvidence) * 100) : 0
+                  return (
+                    <tr key={a.id} className="hover:bg-surface-muted/50">
+                      <td className="px-4 py-3 font-medium text-foreground-strong">{a.school.name}</td>
+                      <td className="px-4 py-3 text-muted-foreground">{a.branch?.name || "كامل المدرسة"}</td>
+                      <td className="px-4 py-3 text-muted-foreground">{a.assessor?.name ?? "غير محدد"}</td>
+                      <td className="px-4 py-3"><Badge variant={a.stage ? "info" : "neutral"}>{getStageLabel(a.stage)}</Badge></td>
+                      <td className="px-4 py-3 text-muted-foreground">{a.academicYear?.label ?? "غير محدد"}</td>
+                      <td className="px-4 py-3 text-muted-foreground numeric">{formatDate(a.startedAt.toISOString())}</td>
+                      <td className="px-4 py-3"><Badge variant={a.status === "COMPLETED" ? "success" : "warning"} dot>{a.status === "COMPLETED" ? "مكتمل" : "جاري"}</Badge></td>
+                      <td className="px-4 py-3">
+                        <div className="flex items-center gap-2">
+                          <Progress value={score} size="sm" className="w-16" tone={score === 100 ? "success" : "default"} />
+                          <span className="text-[12px] font-medium numeric">{score}%</span>
+                        </div>
+                      </td>
+                      <td className="px-4 py-3 text-left">
+                        <Link href={`/quality/assessments/${a.id}/results`}>
+                          <Button variant="ghost" size="sm">عرض</Button>
+                        </Link>
+                      </td>
+                    </tr>
+                  )
+                })}
+                {saList.length === 0 && (
+                  <tr><td colSpan={9} className="px-4 py-8 text-center text-muted-foreground">لا توجد تقييمات مطابقة للفلاتر المحددة.</td></tr>
+                )}
+              </tbody>
+            </table>
+          </CardContent>
+        </Card>
 
         {/* Desktop Table Layout */}
         <Card className="overflow-hidden hidden md:block">
@@ -247,7 +439,7 @@ export default async function ReportsPage({
                       </Badge>
                     </td>
                     <td className="px-6 py-4 text-left">
-                      <Link href={`/reports/print?scope=single&schoolId=${s.id}`}>
+                      <Link href={`/reports/print?scope=single&schoolId=${s.id}${filtersQsSuffix}`}>
                         <Button variant="ghost" size="sm">تقرير المدرسة</Button>
                       </Link>
                     </td>
@@ -258,40 +450,35 @@ export default async function ReportsPage({
           </CardContent>
         </Card>
 
-        {/* Mobile Card Layout */}
+        {/* Mobile Cards */}
         <div className="grid grid-cols-1 gap-4 md:hidden min-w-0">
           {schoolStats.map((s) => (
             <Card key={s.id} className="p-4 min-w-0">
-              <div className="flex items-center gap-3 mb-3">
-                {s.logoUrl ? (
-                  <Image src={s.logoUrl} alt={s.name} width={40} height={40} className="rounded-full shrink-0" />
-                ) : (
-                  <div className="w-10 h-10 rounded-full bg-primary/10 flex items-center justify-center text-primary font-bold text-sm shrink-0">{s.name.charAt(0)}</div>
-                )}
-                <div className="min-w-0">
-                  <h3 className="font-bold text-foreground-strong truncate">{s.name}</h3>
-                  <p className="text-xs text-muted-foreground">{s._count.branches} فروع • {s.completed} تقييم مكتمل</p>
-                </div>
-              </div>
-              <div className="border-t pt-3">
-                <div className="flex justify-between items-center mb-2">
-                  <span className="text-xs text-muted-foreground">الأداء العام</span>
-                  <Badge variant={s.percentage === null ? "neutral" : s.percentage >= 90 ? "success" : s.percentage >= 75 ? "info" : s.percentage >= 50 ? "warning" : "danger"}>
-                    {s.band}
-                  </Badge>
-                </div>
-                {s.percentage !== null ? (
-                  <div className="flex items-center gap-2 mb-3">
-                    <Progress value={s.percentage} size="sm" className="w-full" tone={s.percentage === 100 ? "success" : "default"} />
-                    <span className="text-[12px] font-medium text-muted-foreground numeric">{s.percentage}%</span>
+              <div className="flex items-start justify-between gap-2 mb-3">
+                <div className="flex items-center gap-3 min-w-0">
+                  {s.logoUrl ? (
+                    <Image src={s.logoUrl} alt={s.name} width={36} height={36} className="rounded-full shrink-0" />
+                  ) : (
+                    <div className="w-9 h-9 rounded-full bg-primary/10 flex items-center justify-center text-primary font-bold text-xs shrink-0">{s.name.charAt(0)}</div>
+                  )}
+                  <div className="min-w-0">
+                    <p className="font-medium text-foreground-strong truncate">{s.name}</p>
+                    <p className="text-[11px] text-muted-foreground numeric">{s._count.branches} فرع • {s.completed} تقييم مكتمل</p>
                   </div>
-                ) : (
-                  <p className="text-[12px] text-muted-foreground mb-3">غير مقيم</p>
-                )}
-                <Link href={`/reports/print?scope=single&schoolId=${s.id}`} className="block">
-                  <Button variant="outline" size="sm" className="w-full">عرض التقرير</Button>
-                </Link>
+                </div>
+                <Badge variant={s.percentage === null ? "neutral" : s.percentage >= 90 ? "success" : s.percentage >= 75 ? "info" : s.percentage >= 50 ? "warning" : "danger"}>
+                  {s.band}
+                </Badge>
               </div>
+              {s.percentage !== null && (
+                <div className="flex items-center gap-2 mb-3">
+                  <Progress value={s.percentage} size="sm" className="w-full" tone={s.percentage === 100 ? "success" : "default"} />
+                  <span className="text-[12px] font-medium numeric">{s.percentage}%</span>
+                </div>
+              )}
+              <Link href={`/reports/print?scope=single&schoolId=${s.id}${filtersQsSuffix}`} className="block">
+                <Button variant="outline" size="sm" className="w-full">تقرير المدرسة</Button>
+              </Link>
             </Card>
           ))}
         </div>
@@ -300,6 +487,8 @@ export default async function ReportsPage({
           <h3 className="font-bold mb-4">تصدير تقرير شامل (جميع المدارس)</h3>
           <form action="/reports/print" method="GET">
             <input type="hidden" name="scope" value="all" />
+            {/* فلاتر السجل تُمرّر للتقرير المطبوع كي يطابق القائمة المفلترة */}
+            {filterHiddenInputs}
             <Button type="submit" variant="outline">تجهيز التقرير الشامل (PDF)</Button>
           </form>
         </Card>
@@ -316,7 +505,40 @@ export default async function ReportsPage({
 
     if (!branch) return null
 
-    const perf = await calculateBranchPerformance(branch.id)
+    const perf = await calculateBranchPerformance(branch.id, stageFilter)
+
+    // (§3) فلاتر السجل + خياراتها من بيانات الفرع الفعلية — الاستعلام مقيّد بفرع هذا الدور
+    // الحالة: «حسب الافتراضي» (بلا معامل) = COMPLETED كما كان — و«الكل» الصريح يلغي قيد
+    // الحالة نهائيًا (listStatus !== "ALL" أدناه) بدل دفنه في COMPLETED — نوع التصفية
+    // AssessmentStatusFilter من وحدة الفلاتر نفسها حتى يقبل مقارنة "ALL" ترجمةً ودلالةً.
+    const listStatus: AssessmentStatusFilter =
+      filters.status === "IN_PROGRESS" || filters.status === "ALL" ? filters.status : "COMPLETED"
+    const [bmList, bmAssessorRows, bmYears, bmTotalEvidence] = await Promise.all([
+      prisma.assessment.findMany({
+        where: {
+          branchId: branch.id,
+          type: { not: "PRIVATE_REVIEW" },
+          ...buildReportFilterWhere(filters),
+          ...(listStatus !== "ALL" ? { status: listStatus } : {}),
+        },
+        include: {
+          assessor: { select: { id: true, name: true, role: true } },
+          academicYear: { select: { id: true, label: true } },
+          evidenceResponses: { where: { isVerified: true }, select: { evidenceId: true } },
+        },
+        orderBy: { startedAt: "desc" },
+      }),
+      prisma.assessment.findMany({
+        where: { branchId: branch.id, type: { not: "PRIVATE_REVIEW" } },
+        select: { assessor: { select: { id: true, name: true } } },
+        distinct: ["assessorId"],
+      }),
+      prisma.academicYear.findMany({ where: { schoolId: branch.school.id }, orderBy: { startYear: "desc" } }),
+      prisma.fixedEvidence.count(),
+    ])
+    const bmAssessors = Array.from(
+      new Map(bmAssessorRows.filter(r => r.assessor?.id).map(r => [r.assessor!.id, r.assessor!.name || "غير محدد"]))
+    ).map(([id, name]) => ({ id, name }))
 
     return (
       <div className="space-y-6">
@@ -324,6 +546,28 @@ export default async function ReportsPage({
           title={`تقارير فرع ${branch.name}`}
           description="نتائج تقييم الجودة لفرعك مع دعم متعدد المقيّمين."
           breadcrumbs={[{ label: 'الرئيسية', href: '/' }, { label: 'التقارير' }]}
+        />
+
+        <StageFilterBar current={stageFilter} />
+
+        {/* (§3) شريط فلاتر السجل — مدير الفرع: مقيّم + عام + فترة + حالة (والمرحلة من شريطها القائم) */}
+        <ReportFiltersBar
+          assessors={bmAssessors}
+          years={bmYears.map(y => ({ id: y.id, label: y.label }))}
+          stageParam={stageParam}
+          current={{
+            assessorId: filters.assessorId,
+            yearParam: filterParams.year,
+            from: filterParams.from,
+            to: filterParams.to,
+            status: filters.status,
+          }}
+        />
+        {/* (جديد) بطاقة الأداء العام المرجحة للفرع + لوحات المراحل — إضافة فوق المحتوى القائم دون أي تغيير عليه */}
+        <WeightedEvaluationSection
+          scope={{ branchId: branch.id }}
+          stageFilter={stageFilter}
+          printHref={`/reports/print?scope=single&schoolId=${branch.school.id}&branchId=${branch.id}${filtersQsSuffix}`}
         />
 
         {/* Overall Branch Performance */}
@@ -381,7 +625,7 @@ export default async function ReportsPage({
                           </Badge>
                         </td>
                         <td className="px-4 py-3 text-left">
-                          <Link href={`/reports/print?scope=evaluator&branchId=${branch.id}&evaluatorId=${ev.id}`}>
+                          <Link href={`/reports/print?scope=evaluator&branchId=${branch.id}&evaluatorId=${ev.id}${stageParam ? `&stage=${stageParam}` : ""}`}>
                             <Button variant="outline" size="sm">تقرير فردي</Button>
                           </Link>
                         </td>
@@ -410,7 +654,7 @@ export default async function ReportsPage({
                   <Progress value={ev.averageScore} size="sm" className="w-full" tone={ev.averageScore === 100 ? "success" : "default"} />
                   <span className="text-[12px] font-medium numeric">{ev.averageScore}%</span>
                 </div>
-                <Link href={`/reports/print?scope=evaluator&branchId=${branch.id}&evaluatorId=${ev.id}`}>
+                <Link href={`/reports/print?scope=evaluator&branchId=${branch.id}&evaluatorId=${ev.id}${stageParam ? `&stage=${stageParam}` : ""}`}>
                   <Button variant="outline" size="sm" className="w-full">تقرير فردي</Button>
                 </Link>
               </Card>
@@ -418,28 +662,39 @@ export default async function ReportsPage({
           </div>
         )}
 
-        {/* Individual Assessment Scores */}
-        {perf.assessments.length > 0 && (
+        {/* Individual Assessment Scores — (§2+§3) كل تقييم مدخل منفصل مطابق للفلاتر */}
+        {bmList.length > 0 && (
           <Card>
             <CardContent className="p-6 min-w-0">
-              <h3 className="font-bold mb-4">تفاصيل التقييمات المكتملة</h3>
+              <h3 className="font-bold mb-4">تفاصيل التقييمات المطابقة للفلاتر</h3>
               <div className="divide-y divide-border">
-                {perf.assessments.map((a: any) => (
-                  <div key={a.id} className="py-3 flex justify-between items-center gap-2">
-                    <div className="min-w-0">
-                      <p className="font-medium text-foreground-strong truncate">{a.assessorName}</p>
-                      <p className="text-xs text-muted-foreground truncate">{a.assessorRole} • {a.verifiedCount}/{a.totalEvidence} شاهد متحقق</p>
+                {bmList.map(a => {
+                  const verified = countDistinctVerifiedEvidence(a.evidenceResponses)
+                  const score = bmTotalEvidence > 0 ? Math.round((verified / bmTotalEvidence) * 100) : 0
+                  return (
+                    <div key={a.id} className="py-3 flex justify-between items-center gap-2">
+                      <div className="min-w-0">
+                        <p className="font-medium text-foreground-strong truncate">{a.assessor?.name ?? "غير محدد"}</p>
+                        <p className="text-xs text-muted-foreground truncate">
+                          {a.assessor?.role ?? "غير محدد"} • {verified}/{bmTotalEvidence} شاهد متحقق • {a.academicYear?.label ?? "العام: غير محدد"} • {formatDate(a.startedAt.toISOString())}
+                        </p>
+                      </div>
+                      <div className="flex items-center gap-3 shrink-0">
+                        <Badge variant={a.stage ? "info" : "neutral"}>{getStageLabel(a.stage)}</Badge>
+                        <Badge variant={a.status === "COMPLETED" ? "success" : "warning"} dot>{a.status === "COMPLETED" ? "مكتمل" : "جاري"}</Badge>
+                        <Badge variant={score >= 90 ? "success" : score >= 75 ? "info" : score >= 50 ? "warning" : "danger"}>
+                          {score}%
+                        </Badge>
+                        <Link href={`/quality/assessments/${a.id}/results`}>
+                          <Button variant="ghost" size="sm">عرض</Button>
+                        </Link>
+                      </div>
                     </div>
-                    <div className="flex items-center gap-3 shrink-0">
-                      <Badge variant={a.score >= 90 ? "success" : a.score >= 75 ? "info" : a.score >= 50 ? "warning" : "danger"}>
-                        {a.score}%
-                      </Badge>
-                      <Link href={`/quality/assessments/${a.id}/results`}>
-                        <Button variant="ghost" size="sm">عرض</Button>
-                      </Link>
-                    </div>
-                  </div>
-                ))}
+                  )
+                })}
+                {bmList.length === 0 && (
+                  <p className="py-4 text-center text-muted-foreground">لا توجد تقييمات مطابقة للفلاتر المحددة.</p>
+                )}
               </div>
             </CardContent>
           </Card>
@@ -452,11 +707,13 @@ export default async function ReportsPage({
               <input type="hidden" name="scope" value="single" />
               <input type="hidden" name="schoolId" value={branch.school.id} />
               <input type="hidden" name="branchId" value={branch.id} />
+              {filterHiddenInputs}
               <Button type="submit">تقرير الفرع الشامل (PDF)</Button>
             </form>
             <form action="/reports/print" method="GET">
               <input type="hidden" name="scope" value="comprehensive" />
               <input type="hidden" name="branchId" value={branch.id} />
+              {filterHiddenInputs}
               <Button type="submit" variant="outline">تقرير مقارنة المشرفين (PDF)</Button>
             </form>
           </div>
@@ -472,7 +729,7 @@ export default async function ReportsPage({
       include: { 
         branches: true,
         assessments: { 
-          where: { type: { not: "PRIVATE_REVIEW" }, status: "COMPLETED" },
+          where: { type: { not: "PRIVATE_REVIEW" }, status: "COMPLETED", ...(stageFilter !== undefined ? { stage: stageFilter } : {}) },
           include: { assessor: true, branch: true }
         }
       }
@@ -480,7 +737,36 @@ export default async function ReportsPage({
 
     if (!school) return null
 
-    const perf = await calculateSchoolPerformance(school.id)
+    const perf = await calculateSchoolPerformance(school.id, stageFilter)
+
+    // (§3) فلاتر السجل + خياراتها من بيانات المدرسة الفعلية — الاستعلام مقيّد بمدرسة هذا الدور
+    // الحالة: «حسب الافتراضي» (بلا معامل) = COMPLETED كما كان — و«الكل» الصريح يلغي قيد
+    // الحالة نهائيًا (listStatus !== "ALL" أدناه) بدل دفنه في COMPLETED — نوع التصفية
+    // AssessmentStatusFilter من وحدة الفلاتر نفسها حتى يقبل مقارنة "ALL" ترجمةً ودلالةً.
+    const listStatus: AssessmentStatusFilter =
+      filters.status === "IN_PROGRESS" || filters.status === "ALL" ? filters.status : "COMPLETED"
+    const [smList, smYears, smTotalEvidence] = await Promise.all([
+      prisma.assessment.findMany({
+        where: {
+          schoolId: school.id,
+          type: { not: "PRIVATE_REVIEW" },
+          ...buildReportFilterWhere(filters),
+          ...(listStatus !== "ALL" ? { status: listStatus } : {}),
+        },
+        include: {
+          assessor: { select: { id: true, name: true, role: true } },
+          branch: { select: { id: true, name: true } },
+          academicYear: { select: { id: true, label: true } },
+          evidenceResponses: { where: { isVerified: true }, select: { evidenceId: true } },
+        },
+        orderBy: { startedAt: "desc" },
+      }),
+      prisma.academicYear.findMany({ where: { schoolId: school.id }, orderBy: { startYear: "desc" } }),
+      prisma.fixedEvidence.count(),
+    ])
+    const smAssessors = Array.from(
+      new Map(school.assessments.filter(a => a.assessor?.id).map(a => [a.assessor!.id, a.assessor!.name || "غير محدد"]))
+    ).map(([id, name]) => ({ id, name }))
 
     return (
       <div className="space-y-6">
@@ -488,6 +774,30 @@ export default async function ReportsPage({
           title={`تقارير ${school.name}`}
           description="نتائج تقييم الجودة لمدرستك مع دعم متعدد المقيّمين."
           breadcrumbs={[{ label: 'الرئيسية', href: '/' }, { label: 'التقارير' }]}
+        />
+
+        <StageFilterBar current={stageFilter} />
+
+        {/* (§3) شريط فلاتر السجل — مدير المدرسة: مقيّم + عام + فترة + حالة (والمرحلة من شريطها القائم) */}
+        <ReportFiltersBar
+          assessors={smAssessors}
+          years={smYears.map(y => ({ id: y.id, label: y.label }))}
+          stageParam={stageParam}
+          current={{
+            assessorId: filters.assessorId,
+            yearParam: filterParams.year,
+            from: filterParams.from,
+            to: filterParams.to,
+            status: filters.status,
+          }}
+        />
+
+        {/* (جديد) بطاقة الأداء العام المرجحة + لوحات المراحل — إضافة فوق المحتوى القائم دون أي تغيير عليه
+            الحراسة والنطاق مفروضان على الخادم داخل getWeightedCardData */}
+        <WeightedEvaluationSection
+          scope={{ schoolId: school.id }}
+          stageFilter={stageFilter}
+          printHref={`/reports/print?scope=single&schoolId=${school.id}${filtersQsSuffix}`}
         />
 
         <Card className="p-8 text-center bg-primary text-white shadow-premium">
@@ -572,21 +882,34 @@ export default async function ReportsPage({
           </div>
         )}
 
-        {/* Individual Assessment List */}
-        {perf.assessments.length > 0 && (
+        {/* Individual Assessment List — (§2+§3) كل تقييم مدخل منفصل مطابق للفلاتر بنتيجته وتاريخه وفرعه ومقيّمه ومرحلته وعامه */}
+        {smList.length > 0 && (
           <Card>
             <CardContent className="p-6 min-w-0">
-              <h3 className="font-bold mb-4">سجل التقييمات المكتملة</h3>
+              <h3 className="font-bold mb-4">سجل التقييمات المطابقة للفلاتر</h3>
               <div className="divide-y divide-border">
-                {perf.assessments.map((a: any) => (
-                  <div key={a.id} className="py-3 flex justify-between items-center gap-2">
-                    <div className="min-w-0">
-                      <p className="font-medium text-foreground-strong truncate">{a.assessorName}</p>
-                      <p className="text-xs text-muted-foreground truncate">{a.assessorRole} • {a.verifiedCount}/{a.totalEvidence} شاهد</p>
+                {smList.map(a => {
+                  const verified = countDistinctVerifiedEvidence(a.evidenceResponses)
+                  const score = smTotalEvidence > 0 ? Math.round((verified / smTotalEvidence) * 100) : 0
+                  return (
+                    <div key={a.id} className="py-3 flex justify-between items-center gap-2">
+                      <div className="min-w-0">
+                        <p className="font-medium text-foreground-strong truncate">{a.assessor?.name ?? "غير محدد"}</p>
+                        <p className="text-xs text-muted-foreground truncate">
+                          {a.assessor?.role ?? "غير محدد"} • {a.branch?.name || "كامل المدرسة"} • {verified}/{smTotalEvidence} شاهد • {a.academicYear?.label ?? "العام: غير محدد"} • {formatDate(a.startedAt.toISOString())}
+                        </p>
+                      </div>
+                      <div className="flex items-center gap-3 shrink-0">
+                        <Badge variant={a.stage ? "info" : "neutral"}>{getStageLabel(a.stage)}</Badge>
+                        <Badge variant={a.status === "COMPLETED" ? "success" : "warning"} dot>{a.status === "COMPLETED" ? "مكتمل" : "جاري"}</Badge>
+                        <Badge variant={score >= 90 ? "success" : score >= 75 ? "info" : score >= 50 ? "warning" : "danger"}>{score}%</Badge>
+                        <Link href={`/quality/assessments/${a.id}/results`}>
+                          <Button variant="outline" size="sm">عرض</Button>
+                        </Link>
+                      </div>
                     </div>
-                    <Badge variant={a.score >= 90 ? "success" : a.score >= 75 ? "info" : a.score >= 50 ? "warning" : "danger"}>{a.score}%</Badge>
-                  </div>
-                ))}
+                  )
+                })}
               </div>
             </CardContent>
           </Card>
@@ -597,6 +920,7 @@ export default async function ReportsPage({
           <form action="/reports/print" method="GET">
             <input type="hidden" name="scope" value="single" />
             <input type="hidden" name="schoolId" value={school.id} />
+            {filterHiddenInputs}
             <Button type="submit">تجهيز تقرير المدرسة (PDF)</Button>
           </form>
         </Card>
@@ -606,26 +930,36 @@ export default async function ReportsPage({
 
   // === 4. Quality Assessor: Own assessments ===
   if (isQualityAssessor && user.schoolId) {
+    // (§4) تقييماته هو فقط: assessorId ثابت من المستخدم الموثق — أي assessorId في
+    // الرابط يُتجاهل حصرًا هنا، والفلاتر الأخرى تضيّق ولا توسع النطاق
+    const qaStatus = filters.status && filters.status !== "ALL" ? { status: filters.status } : {}
     const assessments = await prisma.assessment.findMany({
       where: { 
         assessorId: user.id, 
-        type: { not: "PRIVATE_REVIEW" } 
+        type: { not: "PRIVATE_REVIEW" },
+        // (§6) فلتر المرحلة/العام/الفترة — تقييمات المقيّم تُعرض حسب مرحلتها
+        ...buildReportFilterWhere({ ...filters, assessorId: undefined, schoolId: undefined }),
+        ...qaStatus,
       },
-      include: { school: true, branch: true }
+      include: { school: true, branch: true, academicYear: { select: { id: true, label: true } } }
     })
+    const qaYears = await prisma.academicYear.findMany({ where: { schoolId: user.schoolId }, orderBy: { startYear: "desc" } })
 
     const completedAssessments = assessments.filter(a => a.status === "COMPLETED")
     const totalEvidence = await prisma.fixedEvidence.count()
     
     const assessmentScores = await Promise.all(
       completedAssessments.map(async (a) => {
-        const verified = await prisma.evidenceResponse.count({
-          where: { assessmentId: a.id, isVerified: true }
+        // (إصلاح التضخم) شواهد مميزة متحققة — صف زيارة إضافي لنفس الشاهد لا يضاعفه
+        const verifiedRows = await prisma.evidenceResponse.findMany({
+          where: { assessmentId: a.id, isVerified: true },
+          select: { evidenceId: true },
+          distinct: ["evidenceId"],
         })
         return {
           ...a,
-          score: totalEvidence > 0 ? Math.round((verified / totalEvidence) * 100) : 0,
-          verifiedCount: verified
+          score: totalEvidence > 0 ? Math.round((verifiedRows.length / totalEvidence) * 100) : 0,
+          verifiedCount: verifiedRows.length
         }
       })
     )
@@ -642,6 +976,22 @@ export default async function ReportsPage({
           title="تقارير تقييماتي"
           description="نتائج تقييمات الجودة التي قمت بإجرائها."
           breadcrumbs={[{ label: 'الرئيسية', href: '/' }, { label: 'التقارير' }]}
+        />
+
+        <StageFilterBar current={stageFilter} />
+
+        {/* (§3) شريط فلاتر السجل للمقيّم — بلا حقل المقيّم (تقييماته هو فقط) */}
+        <ReportFiltersBar
+          assessors={[]}
+          hideAssessor
+          years={qaYears.map(y => ({ id: y.id, label: y.label }))}
+          stageParam={stageParam}
+          current={{
+            yearParam: filterParams.year,
+            from: filterParams.from,
+            to: filterParams.to,
+            status: filters.status,
+          }}
         />
 
         <Card className="p-8 text-center bg-primary text-white shadow-premium">
@@ -672,10 +1022,11 @@ export default async function ReportsPage({
                   <div className="min-w-0">
                     <p className="font-medium text-foreground-strong truncate">{a.school.name}</p>
                     <p className="text-xs text-muted-foreground truncate">
-                      {a.branch?.name || "كامل المدرسة"} • {a.verifiedCount}/{totalEvidence} شاهد • {a.status === "COMPLETED" ? "مكتمل" : "جاري"}
+                      {a.branch?.name || "كامل المدرسة"} • {a.verifiedCount}/{totalEvidence} شاهد • {a.academicYear?.label ?? "العام: غير محدد"} • {a.status === "COMPLETED" ? "مكتمل" : "جاري"} • {formatDate(a.startedAt.toISOString())}
                     </p>
                   </div>
                   <div className="flex items-center gap-3 shrink-0">
+                    <Badge variant={a.stage ? "info" : "neutral"}>{getStageLabel(a.stage)}</Badge>
                     {a.status === "COMPLETED" ? (
                       <Badge variant={a.score >= 90 ? "success" : a.score >= 75 ? "info" : a.score >= 50 ? "warning" : "danger"}>{a.score}%</Badge>
                     ) : (

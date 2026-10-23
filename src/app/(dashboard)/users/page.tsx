@@ -1,3 +1,4 @@
+// ===== FILE: src/app/(dashboard)/users/page.tsx =====
 import { prisma } from "@/lib/prisma"
 import { requireRole } from "@/lib/permissions"
 import { PageHeader } from "@/components/layout/PageHeader"
@@ -13,6 +14,7 @@ import Link from "next/link"
 import { formatRelativeTime } from "@/lib/utils"
 import { UserDeleteButton } from "@/components/admin/UserDeleteButton"
 import { EditUserModal } from "@/components/admin/EditUserModal"
+import { getStageLabel } from "@/lib/stages"
 
 export const metadata = { title: "المستخدمون" }
 
@@ -56,6 +58,8 @@ export default async function UsersPage({
         role: true,
         status: true,
         createdAt: true,
+        // (هذه المهمة) المراحل المعينة — لعرضها في الجدول وتعديلها في EditUserModal
+        stages: true,
         school: { select: { id: true, name: true } },
         branch: { select: { id: true, name: true } },
         activities: { take: 1, orderBy: { createdAt: 'desc' }, select: { createdAt: true } },
@@ -153,11 +157,12 @@ export default async function UsersPage({
             />
           ) : (
             <div className="overflow-x-auto">
-              <table className="w-full text-sm text-right min-w-[600px]">
+              <table className="w-full text-sm text-right min-w-[720px]">
                 <thead className="text-[12px] text-muted-foreground bg-surface-muted">
                   <tr>
                     <th className="px-4 py-3.5 font-medium">المستخدم</th>
                     <th className="px-4 py-3.5 font-medium">الدور</th>
+                    <th className="px-4 py-3.5 font-medium hidden md:table-cell">المراحل التعليمية</th>
                     <th className="px-4 py-3.5 font-medium hidden md:table-cell">المدرسة</th>
                     <th className="px-4 py-3.5 font-medium hidden lg:table-cell">الفرع</th>
                     <th className="px-4 py-3.5 font-medium">الحالة</th>
@@ -182,6 +187,21 @@ export default async function UsersPage({
                         </td>
                         <td className="px-4 py-3.5">
                           <Badge variant={roleCfg.variant}>{roleCfg.label}</Badge>
+                        </td>
+                        <td className="px-4 py-3.5 hidden md:table-cell">
+                          {/* (هذه المهمة) المراحل المعينة للحساب — والحساب بلا مراحل
+                              من الأدوار القابلة للتعيين يظهر بوضوح «يحتاج إلى تهيئة» */}
+                          {(u.stages?.length ?? 0) > 0 ? (
+                            <div className="flex flex-wrap gap-1">
+                              {u.stages!.map(s => (
+                                <Badge key={s} variant="info">{getStageLabel(s)}</Badge>
+                              ))}
+                            </div>
+                          ) : u.role === "QUALITY_ASSESSOR" || u.role === "BRANCH_MANAGER" ? (
+                            <Badge variant="amber">يحتاج إلى تهيئة</Badge>
+                          ) : (
+                            <span className="text-muted-foreground">—</span>
+                          )}
                         </td>
                         <td className="px-4 py-3.5 hidden md:table-cell">
                           {u.school ? (

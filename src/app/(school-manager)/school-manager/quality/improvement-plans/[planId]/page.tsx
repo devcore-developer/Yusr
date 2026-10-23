@@ -48,7 +48,7 @@ export default async function PlanDetailsPage({ params }: { params: { planId: st
         ]}
         actions={
           <div className="flex gap-2">
-            <Link href={`/school-manager/quality/improvement-plans/${planData.id}/print`} target="_blank">
+            <Link href={`/improvement-plans/${planData.id}/print`} target="_blank">
               <Button variant="outline" size="md" icon={<Printer className="w-4 h-4" />}>طباعة</Button>
             </Link>
             <Link href={`/school-manager/quality/improvement-plans/${planData.id}/edit`}>

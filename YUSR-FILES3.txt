@@ -1,0 +1,2387 @@
+﻿===== FILE: prisma\schema.prisma =====
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum UserRole {
+  SUPER_ADMIN
+  SCHOOL_MANAGER
+  BRANCH_MANAGER
+  QUALITY_ASSESSOR
+}
+
+enum UserStatus {
+  ACTIVE
+  INVITED
+  SUSPENDED
+}
+
+enum SchoolStatus {
+  ACTIVE
+  SUSPENDED
+  EXPIRED
+  PENDING
+}
+
+enum SubscriptionStatus {
+  ACTIVE
+  EXPIRING_SOON
+  EXPIRED
+  SUSPENDED
+}
+
+enum AssessmentStatus {
+  NOT_STARTED
+  IN_PROGRESS
+  COMPLETED
+}
+
+enum GapSeverity {
+  HIGH
+  MEDIUM
+  LOW
+}
+
+enum GapStatus {
+  OPEN
+  IN_PROGRESS
+  RESOLVED
+}
+
+enum EducationalStage {
+  KINDERGARTEN
+  PRIMARY
+  INTERMEDIATE
+  SECONDARY
+  SPECIAL_EDUCATION
+}
+
+
+model User {
+  id            String     @id @default(cuid())
+  name          String
+  email         String     @unique
+  password      String
+  role          UserRole
+  status        UserStatus @default(ACTIVE)
+  schoolId      String?
+  stages        EducationalStage[]
+  branchId      String?
+  createdAt     DateTime   @default(now())
+  updatedAt     DateTime   @updatedAt
+  uploadedAttachments AssessmentAttachment[] @relation("UploadedAttachments")
+
+  school        School?    @relation(fields: [schoolId], references: [id], onDelete: SetNull)
+  branch        Branch?    @relation("BranchUsers", fields: [branchId], references: [id], onDelete: SetNull)
+  managedBranches Branch[] @relation("BranchManager")
+  assessments   Assessment[]
+  activities    Activity[]
+  
+  plansCreated    ImprovementPlan[] @relation("CreatedPlans")
+  actionsAssigned ImprovementAction[] @relation("AssignedActions")
+  followUpsCreated ImprovementFollowUp[] @relation("CreatedFollowUps")
+  evidenceUploaded Evidence[] @relation("UploadedEvidence")
+
+  @@index([schoolId])
+  @@index([branchId])
+  @@index([role])
+}
+
+model School {
+  id            String       @id @default(cuid())
+  name          String
+  nameEn        String?
+  schoolCode    String?      @unique
+  schoolType    String?
+  educationalStage String?
+  description   String?
+  logoUrl       String?
+  websiteUrl    String?
+  officialEmail String?
+  phone         String?
+  alternativePhone String?
+  location      String
+  country       String?      @default("مصر")
+  governorate   String?
+  city          String?
+  address       String?
+  postalCode    String?
+  establishedYear Int?
+  registrationNumber String?
+  academicYear  String?
+  studentCount  Int?
+  teacherCount  Int?
+  administrativeStaffCount Int?
+  buildingCount Int?
+  capacity      Int?
+  internalNotes String?
+  
+  status        SchoolStatus @default(ACTIVE)
+  createdAt     DateTime     @default(now())
+  updatedAt     DateTime     @updatedAt
+
+  branches      Branch[]
+  users         User[]
+  subscriptions Subscription[]
+  assessments   Assessment[]
+  gaps          Gap[]
+  plans         ImprovementPlan[]
+  activities    Activity[]
+  surveys       Survey[]
+}
+
+model Branch {
+  id            String       @id @default(cuid())
+  schoolId      String
+  name          String
+  location      String
+  phone         String?
+  managerId     String?
+  status        SchoolStatus @default(ACTIVE)
+  createdAt     DateTime     @default(now())
+  updatedAt     DateTime     @updatedAt
+
+  school        School       @relation(fields: [schoolId], references: [id], onDelete: Cascade)
+  manager       User?        @relation("BranchManager", fields: [managerId], references: [id], onDelete: SetNull)
+  users         User[]       @relation("BranchUsers")
+  assessments   Assessment[]
+  gaps          Gap[]
+  plans         ImprovementPlan[]
+  activities    Activity[]
+
+  @@index([schoolId])
+}
+
+model Subscription {
+  id            String             @id @default(cuid())
+  schoolId      String
+  plan          String
+  status        SubscriptionStatus
+  startDate     DateTime
+  endDate       DateTime
+  createdAt     DateTime           @default(now())
+  updatedAt     DateTime           @updatedAt
+
+  school        School             @relation(fields: [schoolId], references: [id], onDelete: Cascade)
+
+  @@index([schoolId])
+}
+
+model Domain {
+  id            String     @id @default(cuid())
+  name          String     @unique
+  description   String
+  axes          Axis[]
+  indicators    Indicator[]
+}
+
+model Axis {
+  id            String     @id @default(cuid())
+  domainId      String
+  name          String
+  domain        Domain     @relation(fields: [domainId], references: [id])
+  indicators    Indicator[]
+}
+
+model AssessmentTool {
+  id            String     @id @default(cuid())
+  name          String     @unique
+  indicators    Indicator[] @relation("IndicatorTools")
+}
+
+model Indicator {
+  id            String     @id @default(cuid())
+  domainId      String
+  axisId        String
+  code          String     @unique
+  description   String
+  targetStatus  String
+  guidePage     Int        @default(0)
+  coverage      String?    @default("مغطى")
+  evidenceCount Int        @default(0)
+  paragraphCount Int       @default(0)
+  
+  domain        Domain     @relation(fields: [domainId], references: [id])
+  axis          Axis       @relation(fields: [axisId], references: [id])
+  tools         AssessmentTool[] @relation("IndicatorTools")
+  
+  responses     AssessmentResponse[]
+  gaps          Gap[]
+  fixedEvidence FixedEvidence[]
+}
+
+model FixedEvidence {
+  id            String     @id @default(cuid())
+  code          String     @unique
+  text          String
+  tool          String
+  indicatorCode String
+  paragraphNo   Int?
+  paragraphText String?
+  indicatorId   String
+  indicator     Indicator  @relation(fields: [indicatorId], references: [id])
+  responses     EvidenceResponse[]
+}
+
+model Assessment {
+  id            String           @id @default(cuid())
+  schoolId      String
+  branchId      String?
+  assessorId    String?
+  status        AssessmentStatus @default(NOT_STARTED)
+  progress      Int              @default(0)
+  score         Int              @default(0)
+  startedAt     DateTime         @default(now())
+  completedAt   DateTime?
+  createdAt     DateTime         @default(now())
+  updatedAt     DateTime         @updatedAt
+  submittedAt   DateTime?
+  stage         EducationalStage?
+  cycle         String?   @default("2024-2025")
+  school        School           @relation(fields: [schoolId], references: [id], onDelete: Cascade)
+  branch        Branch?          @relation(fields: [branchId], references: [id], onDelete: SetNull)
+  assessor      User?            @relation(fields: [assessorId], references: [id], onDelete: SetNull)
+  responses     AssessmentResponse[]
+  evidenceResponses EvidenceResponse[]
+  attachments   AssessmentAttachment[]
+  gaps          Gap[]
+  evidence      Evidence[]
+  plans         ImprovementPlan[]
+  type          String   @default("NORMAL")
+
+  @@index([assessorId])
+  @@index([schoolId, branchId, status])
+  @@index([cycle])
+}
+
+model AssessmentResponse {
+  id            String     @id @default(cuid())
+  assessmentId  String
+  indicatorId   String
+  notes         String?
+  createdAt     DateTime   @default(now())
+  updatedAt     DateTime   @updatedAt
+
+  assessment    Assessment @relation(fields: [assessmentId], references: [id], onDelete: Cascade)
+  indicator     Indicator  @relation(fields: [indicatorId], references: [id])
+
+  @@unique([assessmentId, indicatorId])
+}
+
+model EvidenceResponse {
+  id            String     @id @default(cuid())
+  assessmentId  String
+  evidenceId    String
+  isVerified    Boolean    @default(false)
+  visitNumber   Int?
+  scoreValue    Int?
+  createdAt     DateTime   @default(now())
+  updatedAt     DateTime   @updatedAt
+
+  assessment    Assessment @relation(fields: [assessmentId], references: [id], onDelete: Cascade)
+  evidence      FixedEvidence @relation(fields: [evidenceId], references: [id])
+
+  @@unique([assessmentId, evidenceId, visitNumber])
+}
+
+model Gap {
+  id            String     @id @default(cuid())
+  schoolId      String
+  branchId      String?
+  assessmentId  String
+  indicatorId   String
+  description   String
+  severity      GapSeverity
+  status        GapStatus  @default(OPEN)
+  createdAt     DateTime   @default(now())
+  updatedAt     DateTime   @updatedAt
+
+  school        School     @relation(fields: [schoolId], references: [id], onDelete: Cascade)
+  branch        Branch?    @relation(fields: [branchId], references: [id], onDelete: SetNull)
+  assessment    Assessment @relation(fields: [assessmentId], references: [id], onDelete: Cascade)
+  indicator     Indicator  @relation(fields: [indicatorId], references: [id])
+  plans         ImprovementPlan[]
+
+  @@index([schoolId])
+  @@index([assessmentId])
+}
+
+model ImprovementPlan {
+  id            String   @id @default(cuid())
+  title         String
+  description   String?
+  schoolId      String
+  branchId      String?
+  assessmentId  String?
+  gapId         String?
+  indicatorId   String?
+  objective     String?
+  priority      String   @default("MEDIUM")
+  status        String   @default("DRAFT")
+  progress      Int      @default(0)
+  startDate     DateTime @default(now())
+  targetDate    DateTime
+  completedAt   DateTime?
+  createdById   String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  baseline          Float?
+  targetPercentage  Float?
+  currentMeasured   Float?
+  kpiName           String?
+  successCriteria   String?
+  requiredSupport   String?
+  followUpMethod    String?
+  impactNotes       String?
+  
+  reasons           String?
+  strengths         String?
+  improvements      String?
+
+  school        School   @relation(fields: [schoolId], references: [id], onDelete: Cascade)
+  branch        Branch?  @relation(fields: [branchId], references: [id], onDelete: SetNull)
+  assessment    Assessment? @relation(fields: [assessmentId], references: [id], onDelete: SetNull)
+  gap           Gap?     @relation(fields: [gapId], references: [id], onDelete: SetNull)
+  createdBy     User?     @relation("CreatedPlans", fields: [createdById], references: [id], onDelete: SetNull)
+  actions       ImprovementAction[]
+  followUps     ImprovementFollowUp[]
+
+  @@index([schoolId])
+  @@index([gapId])
+}
+
+model ImprovementAction {
+  id                String   @id @default(cuid())
+  planId            String
+  title             String
+  description       String?
+  responsibleUserId String?
+  status            String   @default("PENDING")
+  startDate         DateTime?
+  dueDate           DateTime?
+  completedAt       DateTime?
+  progress          Int      @default(0)
+  notes             String?
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  plan              ImprovementPlan @relation(fields: [planId], references: [id], onDelete: Cascade)
+  responsible       User?    @relation("AssignedActions", fields: [responsibleUserId], references: [id], onDelete: SetNull)
+  followUps         ImprovementFollowUp[]
+
+  @@index([planId])
+}
+
+model ImprovementFollowUp {
+  id            String   @id @default(cuid())
+  planId        String
+  actionId      String?
+  createdById   String?
+  note          String
+  progress      Int?
+  createdAt     DateTime @default(now())
+
+  plan          ImprovementPlan @relation(fields: [planId], references: [id], onDelete: Cascade)
+  action        ImprovementAction? @relation(fields: [actionId], references: [id], onDelete: Cascade)
+  createdBy     User?     @relation("CreatedFollowUps", fields: [createdById], references: [id], onDelete: SetNull)
+
+  @@index([planId])
+}
+
+model Activity {
+  id            String     @id @default(cuid())
+  actorId       String?
+  schoolId      String?
+  branchId      String?
+  action        String
+  entityType    String
+  entityId      String
+  metadata      Json?
+  createdAt     DateTime   @default(now())
+
+  actor         User?      @relation(fields: [actorId], references: [id], onDelete: SetNull)
+  school        School?    @relation(fields: [schoolId], references: [id], onDelete: SetNull)
+  branch        Branch?    @relation(fields: [branchId], references: [id], onDelete: SetNull)
+
+  @@index([schoolId])
+  @@index([actorId])
+  @@index([branchId])
+}
+
+model Evidence {
+  id            String     @id @default(cuid())
+  assessmentId  String
+  uploadedById  String?
+  type          String     
+  name          String
+  url           String
+  createdAt     DateTime   @default(now())
+
+  assessment    Assessment @relation(fields: [assessmentId], references: [id], onDelete: Cascade)
+  uploader      User?       @relation("UploadedEvidence", fields: [uploadedById], references: [id], onDelete: SetNull)
+  
+  @@index([assessmentId])
+}
+
+model ContactMessage {
+  id          String   @id @default(cuid())
+  name        String
+  institution String?
+  email       String
+  phone       String?
+  subject     String
+  message     String
+  createdAt   DateTime @default(now())
+  isRead      Boolean  @default(false)
+}
+
+model Survey {
+  id            String   @id @default(cuid())
+  type          String
+  percentage    Float
+  indicatorId   String?
+  include       Boolean  @default(false)
+  note          String?
+  schoolId      String?
+  generalResult String?
+  createdAt     DateTime @default(now())
+
+  school        School?  @relation(fields: [schoolId], references: [id], onDelete: SetNull)
+}
+
+model BackupHistory {
+  id        String   @id @default(cuid())
+  type      String
+  status    String
+  fileSize  Int?
+  createdAt DateTime @default(now())
+}
+
+model Initiative {
+  id            String   @id @default(cuid())
+  name          String
+  entity        String?
+  targetGroup   String?
+  linkedPlanId  String?
+  idea          String?
+  generalGoals  String?
+  specialGoals  String?
+  indicators    Json?
+  programs      Json?
+  followUp      String?
+  duration      String?
+  evidenceText  String?
+  evidenceUrl   String?
+  impact        String?
+  sustainability String?
+  improvementPlan String?
+  schoolId      String?
+  createdById   String
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+}
+
+model AssessmentAttachment {
+  id            String   @id @default(cuid())
+  assessmentId  String
+  evidenceId    String
+  uploadedById  String?
+  fileName      String
+  fileType      String
+  fileSize      Int
+  fileData      String
+  createdAt     DateTime @default(now())
+
+  assessment    Assessment @relation(fields: [assessmentId], references: [id], onDelete: Cascade)
+  uploader      User?       @relation("UploadedAttachments", fields: [uploadedById], references: [id], onDelete: SetNull)
+  
+  @@index([assessmentId])
+  @@index([evidenceId])
+}
+===== FILE: package.json =====
+{
+  "name": "yusr-platform",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev",
+    "build": "prisma generate && next build",
+    "start": "next start",
+    "lint": "next lint",
+    "postinstall": "prisma skills sync || exit 0"
+  },
+  "prisma": {
+    "seed": "tsx prisma/seed.ts"
+  },
+  "dependencies": {
+    "@auth/prisma-adapter": "^2.11.3",
+    "@google/generative-ai": "^0.24.1",
+    "@prisma/client": "^5.22.0",
+    "@radix-ui/react-select": "^2.4.1",
+    "bcryptjs": "^3.0.3",
+    "clsx": "^2.1.1",
+    "groq-sdk": "^1.6.0",
+    "lucide-react": "^0.395.0",
+    "next": "14.2.3",
+    "next-auth": "^5.0.0-beta.32",
+    "openai": "^7.30.1",
+    "prisma": "^5.22.0",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "react-markdown": "^10.1.0",
+    "remark-gfm": "^4.0.1",
+    "tailwind-merge": "^2.3.0",
+    "zod": "^4.6.5"
+  },
+  "devDependencies": {
+    "@types/bcryptjs": "^2.4.6",
+    "@types/node": "^20.14.0",
+    "@types/react": "^18.3.3",
+    "@types/react-dom": "^18.3.0",
+    "autoprefixer": "^10.4.19",
+    "postcss": "^8.4.38",
+    "tailwindcss": "^3.4.3",
+    "ts-node": "^10.9.2",
+    "tsx": "^4.23.15",
+    "typescript": "^5.9.3"
+  }
+}
+===== FILE: src\lib\auth.ts =====
+import NextAuth from "next-auth"
+import Credentials from "next-auth/providers/credentials"
+import { PrismaAdapter } from "@auth/prisma-adapter"
+import { prisma } from "@/lib/prisma"
+import bcrypt from "bcryptjs"
+
+export const { handlers, auth, signIn, signOut } = NextAuth({
+  adapter: PrismaAdapter(prisma),
+  session: { strategy: "jwt" },
+  providers: [
+    Credentials({
+      name: "credentials",
+      credentials: {
+        email: { label: "Email", type: "email" },
+        password: { label: "Password", type: "password" }
+      },
+      async authorize(credentials) {
+        if (!credentials?.email || !credentials?.password) return null
+        
+        const user = await prisma.user.findUnique({
+          where: { email: credentials.email as string }
+        })
+
+        if (!user || !user.password) return null
+
+        const passwordMatch = await bcrypt.compare(
+          credentials.password as string,
+          user.password
+        )
+
+        if (!passwordMatch) return null
+
+        return {
+          id: user.id,
+          name: user.name,
+          email: user.email,
+          role: user.role,
+          schoolId: user.schoolId ?? undefined,
+          branchId: user.branchId ?? undefined
+        }
+      }
+    })
+  ],
+  callbacks: {
+    async jwt({ token, user }) {
+      if (user) {
+        token.role = user.role
+        token.schoolId = user.schoolId
+        token.branchId = user.branchId
+      }
+      return token
+    },
+    async session({ session, token }) {
+      if (session.user) {
+        session.user.id = token.sub!
+        session.user.role = token.role as string
+        session.user.schoolId = token.schoolId as string
+        session.user.branchId = token.branchId as string
+      }
+      return session
+    }
+  },
+  pages: {
+    signIn: "/login"
+  }
+})
+===== FILE: src\lib\utils.ts =====
+import { type ClassValue, clsx } from "clsx"
+import { twMerge } from "tailwind-merge"
+
+export function cn(...inputs: ClassValue[]) {
+  return twMerge(clsx(inputs))
+}
+
+export function formatNumber(num: number): string {
+  return new Intl.NumberFormat('en-US').format(num);
+}
+
+export function formatDate(dateString: string): string {
+  if (!dateString || dateString === '-') {
+    return '-';
+  }
+
+  const date = new Date(dateString);
+  
+  // Check if date is invalid
+  if (isNaN(date.getTime())) {
+    return dateString;
+  }
+
+  return new Intl.DateTimeFormat('ar-SA', { 
+    year: 'numeric', 
+    month: 'short', 
+    day: 'numeric' 
+  }).format(date);
+}
+
+export function formatRelativeTime(date: Date | string): string {
+  const d = typeof date === 'string' ? new Date(date) : date
+  if (isNaN(d.getTime())) return '-'
+  
+  const now = new Date()
+  const diff = now.getTime() - d.getTime()
+  const seconds = Math.floor(diff / 1000)
+  const minutes = Math.floor(seconds / 60)
+  const hours = Math.floor(minutes / 60)
+  const days = Math.floor(hours / 24)
+  
+  if (seconds < 60) return 'منذ لحظات'
+  if (minutes < 60) return `منذ ${minutes} دقيقة`
+  if (hours < 24) return `منذ ${hours} ساعة`
+  if (days < 7) return `منذ ${days} ${days === 1 ? 'يوم' : 'أيام'}`
+  if (days < 30) return `منذ ${Math.floor(days / 7)} ${Math.floor(days / 7) === 1 ? 'أسبوع' : 'أسابيع'}`
+  return formatDate(d.toISOString())
+}
+===== FILE: src\features\admin\actions.ts =====
+"use server"
+
+import { prisma } from "@/lib/prisma"
+import { getCurrentUser, getAuthorizedBranchIds } from "@/lib/permissions"
+import bcrypt from "bcryptjs"
+import { revalidatePath } from "next/cache"
+import { UserRole } from "@prisma/client"
+
+async function verifyConfirmation(password: string, confirmPhrase: string, actionType: "DELETE_SCHOOL" | "DELETE_USER") {
+  const user = await getCurrentUser()
+  if (!user || user.role !== "SUPER_ADMIN") {
+    await prisma.activity.create({
+      data: {
+        actorId: user?.id || "unknown",
+        action: `${actionType}_FAILED`,
+        entityType: "SYSTEM",
+        entityId: "AUTH",
+        metadata: { reason: "Unauthorized access attempt" }
+      }
+    }).catch(console.error)
+    return { error: "Unauthorized", user: null }
+  }
+  
+  if (confirmPhrase !== "DELETE") {
+    await prisma.activity.create({
+      data: {
+        actorId: user.id,
+        action: `${actionType}_FAILED`,
+        entityType: "SYSTEM",
+        entityId: "CONFIRMATION",
+        metadata: { reason: "Invalid confirmation phrase" }
+      }
+    }).catch(console.error)
+    return { error: "Invalid confirmation phrase", user: null }
+  }
+  
+  const admin = await prisma.user.findUnique({ where: { id: user.id } })
+  if (!admin || !admin.password) return { error: "Admin account error", user: null }
+  
+  const isValid = await bcrypt.compare(password, admin.password)
+  if (!isValid) {
+    await prisma.activity.create({
+      data: {
+        actorId: user.id,
+        action: `${actionType}_FAILED`,
+        entityType: "SYSTEM",
+        entityId: "PASSWORD",
+        metadata: { reason: "Invalid password" }
+      }
+    }).catch(console.error)
+    return { error: "Invalid password", user: null }
+  }
+  
+  return { error: null, user }
+}
+
+export async function deleteSchool(schoolId: string, password: string, confirmPhrase: string) {
+  const { error, user } = await verifyConfirmation(password, confirmPhrase, "DELETE_SCHOOL")
+  if (error) return { error }
+
+  const school = await prisma.school.findUnique({ where: { id: schoolId } })
+  if (!school) return { error: "School not found" }
+
+  try {
+    const usersToDelete = await prisma.user.findMany({
+      where: {
+        OR: [
+          { schoolId: schoolId },
+          { branch: { schoolId: schoolId } }
+        ],
+        role: { not: "SUPER_ADMIN" }
+      },
+      select: { id: true }
+    })
+    const userIds = usersToDelete.map(u => u.id)
+
+    await prisma.$transaction([
+      prisma.improvementAction.deleteMany({ where: { plan: { schoolId } } }),
+      prisma.improvementFollowUp.deleteMany({ where: { plan: { schoolId } } }),
+      prisma.improvementPlan.deleteMany({ where: { schoolId } }),
+      prisma.gap.deleteMany({ where: { schoolId } }),
+      prisma.evidenceResponse.deleteMany({ where: { assessment: { schoolId } } }),
+      prisma.assessmentResponse.deleteMany({ where: { assessment: { schoolId } } }),
+      prisma.assessmentAttachment.deleteMany({ where: { assessment: { schoolId } } }),
+      prisma.evidence.deleteMany({ where: { assessment: { schoolId } } }),
+      prisma.assessment.deleteMany({ where: { schoolId } }),
+      prisma.survey.deleteMany({ where: { schoolId } }),
+      prisma.user.deleteMany({ where: { id: { in: userIds } } }),
+      prisma.school.delete({ where: { id: schoolId } })
+    ])
+    
+    await prisma.activity.create({
+      data: {
+        actorId: user!.id,
+        schoolId: null,
+        action: "DELETE_SCHOOL",
+        entityType: "SCHOOL",
+        entityId: schoolId,
+        metadata: { name: school.name, deletedUsersCount: userIds.length }
+      }
+    })
+    
+    revalidatePath("/schools")
+    revalidatePath("/users")
+    return { success: true }
+  } catch (e) {
+    console.error(e)
+    return { error: "Failed to delete school due to dependencies." }
+  }
+}
+
+export async function deleteUser(userId: string, password: string, confirmPhrase: string) {
+  const { error, user } = await verifyConfirmation(password, confirmPhrase, "DELETE_USER")
+  if (error) return { error }
+
+  if (userId === user!.id) return { error: "لا يمكنك حذف حسابك الخاص." }
+
+  const targetUser = await prisma.user.findUnique({ where: { id: userId } })
+  if (!targetUser) return { error: "المستخدم غير موجود" }
+
+  if (user!.role === "SCHOOL_MANAGER") {
+    if (targetUser.schoolId !== user!.schoolId) {
+      return { error: "غير مصرح لك بحذف مستخدمين خارج مدرستك." }
+    }
+    if (targetUser.role === "SUPER_ADMIN") {
+      return { error: "لا يمكنك حذف حساب مدير النظام." }
+    }
+  } else if (user!.role !== "SUPER_ADMIN") {
+    return { error: "غير مصرح لك." }
+  }
+
+  if (targetUser.role === "SUPER_ADMIN") {
+    const superAdminCount = await prisma.user.count({ where: { role: "SUPER_ADMIN" } })
+    if (superAdminCount <= 1) return { error: "لا يمكن حذف حساب مدير النظام الوحيد المتبقي." }
+  }
+
+  try {
+    await prisma.user.delete({ where: { id: userId } })
+    
+    await prisma.activity.create({
+      data: {
+        actorId: user!.id,
+        action: "DELETE_USER",
+        entityType: "USER",
+        entityId: userId,
+        metadata: { name: targetUser.name, email: targetUser.email, role: targetUser.role }
+      }
+    })
+    
+    revalidatePath("/users")
+    revalidatePath("/school-manager/users")
+    return { success: true }
+  } catch (e) {
+    return { error: "فشل حذف المستخدم بسبب تبعيات البيانات." }
+  }
+}
+
+export async function createUser(formData: FormData) {
+  const currentUser = await getCurrentUser()
+  if (!currentUser) return { error: "غير مصرح لك بهذا الإجراء." }
+
+  const name = formData.get("name") as string
+  const email = formData.get("email") as string
+  const password = formData.get("password") as string
+  const role = formData.get("role") as string
+  const branchId = formData.get("branchId") as string
+
+  if (!name || !email || !password || !role) {
+    return { error: "جميع الحقول مطلوبة" }
+  }
+
+  if (password.length < 6) {
+    return { error: "كلمة المرور يجب أن تكون 6 أحرف على الأقل" }
+  }
+
+  const existingUser = await prisma.user.findUnique({ where: { email } })
+  if (existingUser) {
+    return { error: "البريد الإلكتروني مستخدم بالفعل" }
+  }
+
+  let finalSchoolId: string | null = null
+  let finalBranchId: string | null = null
+  let finalRole: UserRole = role as UserRole
+
+  if (currentUser.role === "BRANCH_MANAGER") {
+    finalRole = "QUALITY_ASSESSOR"
+    finalSchoolId = currentUser.schoolId
+    finalBranchId = currentUser.branchId
+    // معالجة الربط المزدوج: لو مدير القسم مرتبط عبر Branch.managerId فقط
+    if (!finalBranchId) {
+      const managedBranches = await prisma.branch.findMany({
+        where: { managerId: currentUser.id },
+        select: { id: true }
+      })
+      if (managedBranches.length === 1) finalBranchId = managedBranches[0].id
+    }
+  } else if (currentUser.role === "SCHOOL_MANAGER") {
+    if (finalRole !== "BRANCH_MANAGER" && finalRole !== "QUALITY_ASSESSOR") {
+      return { error: "غير مصرح لك بإنشاء هذا الدور" }
+    }
+    if (!branchId) return { error: "يجب اختيار فرع" }
+    const branch = await prisma.branch.findFirst({ where: { id: branchId, schoolId: currentUser.schoolId! } })
+    if (!branch) return { error: "الفرع غير تابع لمدرستك" }
+    finalSchoolId = currentUser.schoolId
+    finalBranchId = branchId
+  } else if (currentUser.role !== "SUPER_ADMIN") {
+    return { error: "غير مصرح لك بإنشاء مستخدمين" }
+  }
+
+  try {
+    const hashedPassword = await bcrypt.hash(password, 10)
+    const newUser = await prisma.user.create({
+      data: { name, email, password: hashedPassword, role: finalRole, schoolId: finalSchoolId, branchId: finalBranchId, status: "ACTIVE" }
+    })
+    await prisma.activity.create({
+      data: { actorId: currentUser.id, schoolId: finalSchoolId, branchId: finalBranchId, action: "CREATE", entityType: "USER", entityId: newUser.id, metadata: { name, email, role: finalRole } }
+    })
+    revalidatePath("/school-manager/users")
+    revalidatePath("/users")
+    return { success: true }
+  } catch (error) {
+    return { error: "حدث خطأ غير متوقع أثناء إنشاء الحساب." }
+  }
+}
+
+export async function updateSchool(schoolId: string, formData: FormData) {
+  const user = await getCurrentUser()
+  if (!user) return { error: "غير مصرح" }
+
+  if (user.role !== "SUPER_ADMIN" && !(user.role === "SCHOOL_MANAGER" && user.schoolId === schoolId)) {
+    return { error: "غير مصرح لك بتعديل بيانات هذه المدرسة" }
+  }
+
+  const name = formData.get("name") as string
+  const location = formData.get("location") as string
+  const phone = formData.get("phone") as string
+  const logoUrl = formData.get("logoUrl") as string
+
+  try {
+    await prisma.school.update({ where: { id: schoolId }, data: { name, location, phone, logoUrl: logoUrl || undefined } })
+    await prisma.activity.create({ data: { actorId: user.id, schoolId, action: "UPDATE", entityType: "SCHOOL", entityId: schoolId, metadata: { name } } })
+    revalidatePath("/schools")
+    revalidatePath("/school-manager")
+    revalidatePath("/", "layout")
+    return { success: true }
+  } catch (error) {
+    return { error: "حدث خطأ أثناء تحديث بيانات المدرسة" }
+  }
+}
+
+export async function updateBranch(branchId: string, formData: FormData) {
+  const user = await getCurrentUser()
+  if (!user) return { error: "غير مصرح" }
+
+  const branch = await prisma.branch.findUnique({ where: { id: branchId } })
+  if (!branch) return { error: "الفرع غير موجود" }
+
+  if (user.role === "SCHOOL_MANAGER" && branch.schoolId !== user.schoolId) return { error: "غير مصرح لك بتعديل فروع خارج مدرستك" }
+  if (user.role === "BRANCH_MANAGER") {
+    // يدعم الربط المزدوج: branchId مباشرة أو إدارة الفرع عبر Branch.managerId
+    const authorizedBranchIds = await getAuthorizedBranchIds(user)
+    if (!authorizedBranchIds.includes(branchId)) return { error: "غير مصرح لك بتعديل فروع أخرى" }
+  }
+  if (user.role !== "SUPER_ADMIN" && user.role !== "SCHOOL_MANAGER" && user.role !== "BRANCH_MANAGER") return { error: "غير مصرح" }
+
+  const name = formData.get("name") as string
+  const location = formData.get("location") as string
+  const phone = formData.get("phone") as string
+
+  try {
+    await prisma.branch.update({ where: { id: branchId }, data: { name, location, phone } })
+    await prisma.activity.create({ data: { actorId: user.id, schoolId: branch.schoolId, branchId, action: "UPDATE", entityType: "BRANCH", entityId: branchId, metadata: { name } } })
+    revalidatePath("/school-manager/branches")
+    revalidatePath("/school-manager")
+    return { success: true }
+  } catch (error) {
+    return { error: "حدث خطأ أثناء تحديث بيانات الفرع" }
+  }
+}
+
+export async function adminUpdateUser(userId: string, formData: FormData) {
+  const currentUser = await getCurrentUser()
+  if (!currentUser) return { error: "غير مصرح" }
+
+  const targetUser = await prisma.user.findUnique({ where: { id: userId } })
+  if (!targetUser) return { error: "المستخدم غير موجود" }
+
+  // ملاحظة جوهرية (سبب الخطأ الأصلي): حقل الدور قد يكون غائباً تماماً من FormData
+  // لأن قائمة الدور تُعرض disabled لغير مدير النظام، والعناصر المعطلة لا تُرسل قيمها.
+  // لذلك نتعامل معه كقيمة اختيارية ولا نمرر null إلى Prisma أبداً.
+  const name = formData.get("name") as string
+  const email = formData.get("email") as string
+  const submittedRole = formData.get("role") as string | null
+
+  if (!name || !email) {
+    return { error: "الاسم والبريد الإلكتروني مطلوبان" }
+  }
+
+  if (submittedRole && !["SUPER_ADMIN", "SCHOOL_MANAGER", "BRANCH_MANAGER", "QUALITY_ASSESSOR"].includes(submittedRole)) {
+    return { error: "الدور المحدد غير صالح" }
+  }
+
+  // === فحص النطاق والصلاحيات حسب دور المستخدم الحالي (على الخادم) ===
+  if (currentUser.role === "SUPER_ADMIN") {
+    // مدير النظام يعدّل الجميع — مع منع إزالة آخر مدير نظام في المنصة
+    if (targetUser.role === "SUPER_ADMIN" && submittedRole && submittedRole !== "SUPER_ADMIN") {
+      const superAdminCount = await prisma.user.count({ where: { role: "SUPER_ADMIN" } })
+      if (superAdminCount <= 1) {
+        return { error: "لا يمكن تغيير دور مدير النظام الوحيد المتبقي" }
+      }
+    }
+  } else if (currentUser.role === "SCHOOL_MANAGER") {
+    if (!currentUser.schoolId || targetUser.schoolId !== currentUser.schoolId) {
+      return { error: "غير مصرح لك بتعديل مستخدمين خارج مدرستك" }
+    }
+    if (targetUser.role === "SUPER_ADMIN") {
+      return { error: "لا يمكنك تعديل حساب مدير النظام" }
+    }
+    if (submittedRole === "SUPER_ADMIN") {
+      return { error: "لا يمكنك إنشاء أو تعديل حساب ليكون مدير نظام" }
+    }
+    if (submittedRole && submittedRole !== "BRANCH_MANAGER" && submittedRole !== "QUALITY_ASSESSOR") {
+      return { error: "غير مصرح لك بتعيين هذا الدور" }
+    }
+  } else if (currentUser.role === "BRANCH_MANAGER") {
+    // مدير القسم: تعديل بيانات المشرفين (QUALITY_ASSESSOR) التابعين لفرعه فقط
+    if (!currentUser.schoolId || targetUser.schoolId !== currentUser.schoolId) {
+      return { error: "غير مصرح لك بتعديل مقيّمين خارج فرعك" }
+    }
+    if (targetUser.role !== "QUALITY_ASSESSOR") {
+      return { error: "يمكنك تعديل حسابات المشرفين فقط" }
+    }
+    const authorizedBranchIds = await getAuthorizedBranchIds(currentUser)
+    if (!targetUser.branchId || !authorizedBranchIds.includes(targetUser.branchId)) {
+      return { error: "غير مصرح لك بتعديل مقيّمين خارج فرعك" }
+    }
+    // لا يحق لمدير القسم تغيير الأدوار — يتم تجاهل أي دور مُرسل من الطرف الآخر
+  } else {
+    return { error: "غير مصرح" }
+  }
+
+  const emailExists = await prisma.user.findFirst({ where: { email, NOT: { id: userId } } })
+  if (emailExists) return { error: "البريد الإلكتروني مستخدم بالفعل" }
+
+  const data: { name: string; email: string; role?: UserRole } = { name, email }
+  // يُحدَّث الدور فقط إذا أُرسل فعلاً وكان لمرسله حق تغييره
+  if (submittedRole && currentUser.role !== "BRANCH_MANAGER") {
+    data.role = submittedRole as UserRole
+  }
+
+  try {
+    await prisma.user.update({ where: { id: userId }, data })
+    await prisma.activity.create({ data: { actorId: currentUser.id, schoolId: targetUser.schoolId, action: "UPDATE", entityType: "USER", entityId: userId, metadata: { name, email, role: data.role ?? targetUser.role } } })
+    revalidatePath("/users")
+    revalidatePath("/school-manager/users")
+    return { success: true }
+  } catch (error) {
+    return { error: "حدث خطأ أثناء تحديث بيانات المستخدم" }
+  }
+}
+
+export async function adminResetPassword(userId: string, newPassword: string) {
+  const currentUser = await getCurrentUser()
+  if (!currentUser || currentUser.role !== "SUPER_ADMIN") return { error: "غير مصرح" }
+
+  if (newPassword.length < 6) return { error: "كلمة المرور يجب أن تكون 6 أحرف على الأقل" }
+
+  try {
+    const hashedPassword = await bcrypt.hash(newPassword, 10)
+    await prisma.user.update({ where: { id: userId }, data: { password: hashedPassword } })
+    await prisma.activity.create({ data: { actorId: currentUser.id, action: "PASSWORD_RESET", entityType: "USER", entityId: userId, metadata: { info: "Admin reset password" } } })
+    return { success: true }
+  } catch (error) {
+    return { error: "حدث خطأ أثناء إعادة تعيين كلمة المرور" }
+  }
+}
+===== FILE: src\app\(dashboard)\users\page.tsx =====
+import { prisma } from "@/lib/prisma"
+import { requireRole } from "@/lib/permissions"
+import { PageHeader } from "@/components/layout/PageHeader"
+import { Card, CardContent } from "@/components/ui/Card"
+import { Button } from "@/components/ui/Button"
+import { Avatar } from "@/components/ui/Avatar"
+import { Badge, StatusBadge } from "@/components/ui/Badge"
+import { Input } from "@/components/ui/Input"
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/Select"
+import { EmptyState } from "@/components/ui/EmptyState"
+import { ChevronLeft, ChevronRight, Search, Users as UsersIcon, UserPlus, Eye, FilterX } from "lucide-react"
+import Link from "next/link"
+import { formatRelativeTime } from "@/lib/utils"
+import { UserDeleteButton } from "@/components/admin/UserDeleteButton"
+import { EditUserModal } from "@/components/admin/EditUserModal"
+
+export const metadata = { title: "المستخدمون" }
+
+const roleConfig: Record<string, { label: string; variant: 'danger' | 'info' | 'violet' | 'amber' | 'neutral' }> = {
+  SUPER_ADMIN: { label: 'مدير النظام', variant: 'danger' },
+  SCHOOL_MANAGER: { label: 'مدير عام', variant: 'info' },
+  BRANCH_MANAGER: { label: 'مدير قسم', variant: 'violet' },
+  QUALITY_ASSESSOR: { label: 'مشرف', variant: 'amber' },
+}
+
+export default async function UsersPage({
+  searchParams,
+}: {
+  searchParams: { [key: string]: string | string[] | undefined }
+}) {
+  const user = await requireRole(["SUPER_ADMIN"])
+
+  const q = typeof searchParams.q === 'string' ? searchParams.q : undefined
+  const role = typeof searchParams.role === 'string' ? searchParams.role : undefined
+  const status = typeof searchParams.status === 'string' ? searchParams.status : undefined
+  const page = parseInt(typeof searchParams.page === 'string' ? searchParams.page : '1') || 1
+  const pageSize = 10
+
+  const where: Record<string, unknown> = {}
+  if (q) {
+    where.OR = [
+      { name: { contains: q, mode: 'insensitive' } },
+      { email: { contains: q, mode: 'insensitive' } },
+    ]
+  }
+  if (role) where.role = role
+  if (status) where.status = status
+
+  const [users, total] = await Promise.all([
+    prisma.user.findMany({
+      where,
+      select: {
+        id: true,
+        name: true,
+        email: true,
+        role: true,
+        status: true,
+        createdAt: true,
+        school: { select: { id: true, name: true } },
+        branch: { select: { id: true, name: true } },
+        activities: { take: 1, orderBy: { createdAt: 'desc' }, select: { createdAt: true } },
+      },
+      skip: (page - 1) * pageSize,
+      take: pageSize,
+      orderBy: { createdAt: 'desc' },
+    }),
+    prisma.user.count({ where }),
+  ])
+
+  const totalPages = Math.max(1, Math.ceil(total / pageSize))
+  const hasFilters = !!(q || role || status)
+
+  const buildPageUrl = (p: number) => {
+    const params = new URLSearchParams()
+    if (q) params.set('q', q)
+    if (role) params.set('role', role)
+    if (status) params.set('status', status)
+    params.set('page', String(p))
+    return `/users?${params.toString()}`
+  }
+
+  return (
+    <div className="space-y-6">
+      <PageHeader
+        title="المستخدمون"
+        description="إدارة جميع المستخدمين على المنصة — المديرين والمعلمين والمقيّمين."
+        breadcrumbs={[{ label: 'الرئيسية', href: '/' }, { label: 'المستخدمون' }]}
+        actions={
+          <Button variant="primary" size="md" icon={<UserPlus className="w-4 h-4" />}>
+            إضافة مستخدم
+          </Button>
+        }
+      />
+
+      <form className="flex flex-wrap items-center gap-3 p-4 bg-surface border border-border rounded-lg min-w-0">
+        <div className="relative flex-1 min-w-[200px] min-w-0">
+          <Search className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground pointer-events-none" />
+          <Input
+            name="q"
+            defaultValue={q}
+            placeholder="ابحث بالاسم أو البريد الإلكتروني..."
+            className="pr-10"
+          />
+        </div>
+        <Select name="role" defaultValue={role}>
+          <SelectTrigger className="w-full sm:w-auto sm:min-w-[140px]">
+            <SelectValue placeholder="كل الأدوار" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="SUPER_ADMIN">مدير النظام</SelectItem>
+            <SelectItem value="SCHOOL_MANAGER">مدير عام</SelectItem>
+            <SelectItem value="BRANCH_MANAGER">مدير قسم</SelectItem>
+            <SelectItem value="QUALITY_ASSESSOR">مشرف</SelectItem>
+          </SelectContent>
+        </Select>
+        <Select name="status" defaultValue={status}>
+          <SelectTrigger className="w-full sm:w-auto sm:min-w-[120px]">
+            <SelectValue placeholder="كل الحالات" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="ACTIVE">نشط</SelectItem>
+            <SelectItem value="INVITED">مدعو</SelectItem>
+            <SelectItem value="SUSPENDED">موقوف</SelectItem>
+          </SelectContent>
+        </Select>
+        <Button type="submit" variant="primary" size="md" icon={<Search className="w-4 h-4" />}>
+          تصفية
+        </Button>
+        {hasFilters && (
+          <Link href="/users">
+            <Button type="button" variant="ghost" size="md" icon={<FilterX className="w-4 h-4" />}>
+              إلغاء
+            </Button>
+          </Link>
+        )}
+      </form>
+
+      <div className="flex items-center justify-between min-w-0">
+        <p className="text-[13px] text-muted-foreground">
+          <span className="numeric font-medium text-foreground-strong">{total}</span> مستخدم
+          {hasFilters && ' مطابق للفلترة'}
+        </p>
+      </div>
+
+      <Card variant="primary">
+        <CardContent className="p-0 min-w-0">
+          {users.length === 0 ? (
+            <EmptyState
+              icon={<UsersIcon />}
+              title={hasFilters ? 'لا توجد نتائج' : 'لا يوجد مستخدمون'}
+              description={hasFilters ? 'لم نجد مستخدمين مطابقين للفلترة الحالية.' : 'لم يتم تسجيل أي مستخدمين بعد.'}
+              compact
+            />
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm text-right min-w-[600px]">
+                <thead className="text-[12px] text-muted-foreground bg-surface-muted">
+                  <tr>
+                    <th className="px-4 py-3.5 font-medium">المستخدم</th>
+                    <th className="px-4 py-3.5 font-medium">الدور</th>
+                    <th className="px-4 py-3.5 font-medium hidden md:table-cell">المدرسة</th>
+                    <th className="px-4 py-3.5 font-medium hidden lg:table-cell">الفرع</th>
+                    <th className="px-4 py-3.5 font-medium">الحالة</th>
+                    <th className="px-4 py-3.5 font-medium hidden lg:table-cell">آخر نشاط</th>
+                    <th className="px-4 py-3.5 font-medium text-left">إجراءات</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-border">
+                  {users.map((u) => {
+                    const roleCfg = roleConfig[u.role] ?? { label: u.role, variant: 'neutral' as const }
+                    const lastActivity = u.activities[0]?.createdAt
+                    return (
+                      <tr key={u.id} className="hover:bg-surface-muted transition-smooth">
+                        <td className="px-4 py-3.5">
+                          <div className="flex items-center gap-3">
+                            <Avatar name={u.name} size="sm" />
+                            <div className="min-w-0">
+                              <p className="font-medium text-foreground-strong truncate">{u.name}</p>
+                              <p className="text-[12px] text-muted-foreground truncate">{u.email}</p>
+                            </div>
+                          </div>
+                        </td>
+                        <td className="px-4 py-3.5">
+                          <Badge variant={roleCfg.variant}>{roleCfg.label}</Badge>
+                        </td>
+                        <td className="px-4 py-3.5 hidden md:table-cell">
+                          {u.school ? (
+                            <Link href={`/schools/${u.school.id}`} className="text-secondary hover:underline transition-smooth truncate">
+                              {u.school.name}
+                            </Link>
+                          ) : (
+                            <span className="text-muted-foreground">—</span>
+                          )}
+                        </td>
+                        <td className="px-4 py-3.5 hidden lg:table-cell text-muted-foreground">
+                          {u.branch?.name ?? '—'}
+                        </td>
+                        <td className="px-4 py-3.5">
+                          <StatusBadge status={u.status} />
+                        </td>
+                        <td className="px-4 py-3.5 hidden lg:table-cell text-[13px] text-muted-foreground">
+                          {lastActivity ? formatRelativeTime(lastActivity) : 'لا يوجد'}
+                        </td>
+                        <td className="px-4 py-3.5">
+                          <div className="flex items-center gap-1 justify-end">
+                            <Button variant="ghost" size="icon-sm" aria-label="عرض">
+                              <Eye className="w-4 h-4" />
+                            </Button>
+                            <EditUserModal user={u} currentUserRole={user.role} />
+                            <UserDeleteButton userId={u.id} userName={u.name} />
+                          </div>
+                        </td>
+                      </tr>
+                    )
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      {totalPages > 1 && (
+        <div className="flex items-center justify-between min-w-0">
+          <p className="text-[13px] text-muted-foreground">
+            صفحة <span className="numeric font-medium text-foreground-strong">{page}</span> من{' '}
+            <span className="numeric font-medium text-foreground-strong">{totalPages}</span>
+          </p>
+          <div className="flex gap-2">
+            {page > 1 && (
+              <Link href={buildPageUrl(page - 1)}>
+                <Button variant="outline" size="md" icon={<ChevronRight className="w-4 h-4" />}>
+                  السابق
+                </Button>
+              </Link>
+            )}
+            {page < totalPages && (
+              <Link href={buildPageUrl(page + 1)}>
+                <Button variant="outline" size="md" iconPosition="end" icon={<ChevronLeft className="w-4 h-4" />}>
+                  التالي
+                </Button>
+              </Link>
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+===== FILE: src\app\(dashboard)\settings\page.tsx =====
+import { prisma } from "@/lib/prisma"
+import { getCurrentUser } from "@/lib/permissions"
+import { redirect } from "next/navigation"
+import { PageHeader } from "@/components/layout/PageHeader"
+import { Card, CardHeader, CardTitle, CardContent, CardDescription } from "@/components/ui/Card"
+import { Button } from "@/components/ui/Button"
+import { Input } from "@/components/ui/Input"
+import { Avatar } from "@/components/ui/Avatar"
+import { Badge } from "@/components/ui/Badge"
+import { updateProfile, updatePassword } from "./actions"
+import { BackupSection } from "@/components/settings/BackupSection"
+import { User, Shield, Database } from "lucide-react"
+
+export const metadata = { title: "الإعدادات" }
+
+export default async function SettingsPage() {
+  const user = await getCurrentUser()
+  if (!user) return null
+
+  const isAssessor = user.role === "QUALITY_ASSESSOR"
+  const isSuperAdmin = user.role === "SUPER_ADMIN"
+
+  const dbUser = await prisma.user.findUnique({ where: { id: user.id } })
+  if (!dbUser) redirect("/login")
+
+  const backupHistory = isSuperAdmin 
+    ? await prisma.backupHistory.findMany({ orderBy: { createdAt: "desc" }, take: 10 }) 
+    : []
+
+  return (
+    <div className="space-y-6 max-w-5xl">
+      <PageHeader
+        title="الإعدادات"
+        description="إدارة إعدادات حسابك وتفضيلات المنصة."
+        breadcrumbs={[{ label: 'الرئيسية', href: '/' }, { label: 'الإعدادات' }]}
+      />
+
+      {!isAssessor && (
+        <Card variant="primary">
+          <CardHeader>
+            <CardTitle icon={<User className="w-5 h-5" />}>الملف الشخصي</CardTitle>
+            <CardDescription>معلوماتك الأساسية (قابلة للتعديل)</CardDescription>
+          </CardHeader>
+          <CardContent>
+            <form action={updateProfile} className="grid grid-cols-1 md:grid-cols-2 gap-5">
+              <div className="flex items-center gap-4 md:col-span-2">
+                <Avatar name={dbUser.name ?? 'م'} size="lg" />
+                <div>
+                  <p className="font-semibold text-foreground-strong">{dbUser.name}</p>
+                  <p className="text-[13px] text-muted-foreground">{dbUser.email}</p>
+                  {isSuperAdmin && <Badge variant="danger" className="mt-1">مدير النظام</Badge>}
+                </div>
+              </div>
+              <div className="space-y-1.5">
+                <label className="text-[13px] font-medium text-foreground-strong">الاسم الكامل</label>
+                <Input name="name" defaultValue={dbUser.name ?? ''} required />
+              </div>
+              <div className="space-y-1.5">
+                <label className="text-[13px] font-medium text-foreground-strong">البريد الإلكتروني</label>
+                <Input name="email" defaultValue={dbUser.email ?? ''} type="email" required />
+              </div>
+              <div className="md:col-span-2 flex justify-end gap-2 pt-2">
+                <Button type="submit" variant="primary" size="md">حفظ التغييرات</Button>
+              </div>
+            </form>
+          </CardContent>
+        </Card>
+      )}
+
+      <Card variant="primary">
+        <CardHeader>
+          <CardTitle icon={<Shield className="w-5 h-5" />}>الأمان والصلاحيات</CardTitle>
+          <CardDescription>تغيير كلمة المرور وإدارة الوصول</CardDescription>
+        </CardHeader>
+        <CardContent>
+          <form action={updatePassword} className="grid grid-cols-1 md:grid-cols-2 gap-5 mb-6">
+            <div className="space-y-1.5">
+              <label className="text-[13px] font-medium text-foreground-strong">كلمة المرور الجديدة</label>
+              <Input name="newPassword" type="password" placeholder="******" required />
+            </div>
+            <div className="space-y-1.5">
+              <label className="text-[13px] font-medium text-foreground-strong">تأكيد كلمة المرور</label>
+              <Input name="confirmPassword" type="password" placeholder="******" required />
+            </div>
+            <div className="md:col-span-2 flex justify-end gap-2 pt-2">
+              <Button type="submit" variant="outline" size="md">تحديث كلمة المرور</Button>
+            </div>
+          </form>
+          
+          {isSuperAdmin && (
+            <div className="mt-6 pt-6 border-t border-border">
+              <h4 className="text-sm font-bold mb-2">الأدوار والصلاحيات</h4>
+              <p className="text-sm text-muted-foreground mb-2">نظام الصلاحيات في يسر يعتمد على 4 أدوار ثابتة:</p>
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
+                <Badge variant="danger">مدير النظام (Super Admin)</Badge>
+                <Badge variant="info">مدير عام (School Manager)</Badge>
+                <Badge variant="warning">مدير قسم (Branch Manager)</Badge>
+                <Badge variant="success">مشرف (Quality Assessor)</Badge>
+              </div>
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      {isSuperAdmin && (
+        <Card variant="primary">
+          <CardHeader>
+            <CardTitle icon={<Database className="w-5 h-5" />}>النسخ الاحتياطي والبيانات</CardTitle>
+            <CardDescription>تصدير البيانات وإدارة النسخ الاحتياطي</CardDescription>
+          </CardHeader>
+          <CardContent>
+            <BackupSection history={backupHistory} />
+          </CardContent>
+        </Card>
+      )}
+    </div>
+  )
+}
+===== FILE: src\app\(dashboard)\settings\actions.ts =====
+"use server"
+
+import { prisma } from "@/lib/prisma"
+import { getCurrentUser } from "@/lib/permissions"
+import { revalidatePath } from "next/cache"
+import bcrypt from "bcryptjs"
+
+export async function updateProfile(formData: FormData) {
+  const user = await getCurrentUser()
+  if (!user) throw new Error("Unauthorized")
+
+  const name = formData.get("name") as string
+  const email = formData.get("email") as string
+
+  if (!name || !email) throw new Error("الحقول مطلوبة")
+
+  const existingUser = await prisma.user.findFirst({
+    where: { email, NOT: { id: user.id } }
+  })
+
+  if (existingUser) throw new Error("البريد الإلكتروني مستخدم بالفعل من قبل حساب آخر")
+
+  await prisma.user.update({
+    where: { id: user.id },
+    data: { name, email }
+  })
+
+  revalidatePath("/", "layout")
+  revalidatePath("/settings")
+}
+
+export async function updatePassword(formData: FormData) {
+  const user = await getCurrentUser()
+  if (!user) throw new Error("Unauthorized")
+
+  const newPassword = formData.get("newPassword") as string
+  const confirmPassword = formData.get("confirmPassword") as string
+
+  if (!newPassword || newPassword.length < 6) throw new Error("كلمة المرور يجب أن تكون 6 أحرف على الأقل")
+  if (newPassword !== confirmPassword) throw new Error("كلمتا المرور غير متطابقتين")
+
+  const hashedPassword = await bcrypt.hash(newPassword, 10)
+  await prisma.user.update({
+    where: { id: user.id },
+    data: { password: hashedPassword }
+  })
+
+  revalidatePath("/settings")
+  revalidatePath("/school-manager/settings")
+}
+
+export async function createBackup() {
+  const user = await getCurrentUser()
+  if (!user || user.role !== "SUPER_ADMIN") throw new Error("Unauthorized")
+
+  try {
+    const [schools, branches, users, assessments, domains, indicators] = await Promise.all([
+      prisma.school.findMany(),
+      prisma.branch.findMany(),
+      prisma.user.findMany({ select: { id: true, name: true, email: true, role: true, status: true } }),
+      prisma.assessment.findMany(),
+      prisma.domain.findMany(),
+      prisma.indicator.findMany()
+    ])
+
+    const backupData = JSON.stringify({
+      metadata: { exportedAt: new Date().toISOString(), platform: "YUSR Quality Management", version: "1.0" },
+      data: { schools, branches, users, assessments, domains, indicators }
+    }, null, 2)
+
+    const fileSize = Buffer.byteLength(backupData, 'utf-8')
+
+    await prisma.backupHistory.create({ data: { type: "Manual JSON Export", status: "SUCCESS", fileSize } })
+    return { success: true, data: backupData, filename: `yusr-backup-${new Date().toISOString().split('T')[0]}.json` }
+  } catch (error) {
+    await prisma.backupHistory.create({ data: { type: "Manual JSON Export", status: "FAILED", fileSize: 0 } })
+    throw new Error("Failed to create backup")
+  }
+}
+===== FILE: src\features\settings\actions.ts =====
+"use server"
+
+import { prisma } from "@/lib/prisma"
+import { getCurrentUser } from "@/lib/permissions"
+import { revalidatePath } from "next/cache"
+import bcrypt from "bcryptjs"
+
+export async function updateProfile(formData: FormData) {
+  const user = await getCurrentUser()
+  if (!user) throw new Error("غير مصرح")
+
+  const name = formData.get("name") as string
+  const email = formData.get("email") as string
+
+  if (!name || !email) {
+    return { error: "الاسم والبريد الإلكتروني مطلوبان" }
+  }
+
+  try {
+    // التحقق من أن البريد الإلكتروني لا يوجد لدى مستخدم آخر
+    const existingUser = await prisma.user.findFirst({
+      where: { 
+        email, 
+        NOT: { id: user.id } 
+      }
+    })
+
+    if (existingUser) {
+      return { error: "البريد الإلكتروني مستخدم بالفعل من قبل حساب آخر" }
+    }
+
+    await prisma.user.update({
+      where: { id: user.id },
+      data: { name, email }
+    })
+
+    // تحديث الواجهة فوراً في كل الصفحات ليعكس التغيير في الـ Header والـ Sidebar
+    revalidatePath("/settings")
+    revalidatePath("/", "layout")
+    
+    return { success: true }
+  } catch (error) {
+    console.error(error)
+    return { error: "حدث خطأ أثناء تحديث البيانات" }
+  }
+}
+
+export async function updatePassword(formData: FormData) {
+  const user = await getCurrentUser()
+  if (!user) throw new Error("غير مصرح")
+
+  const newPassword = formData.get("newPassword") as string
+  const confirmPassword = formData.get("confirmPassword") as string
+
+  if (!newPassword || !confirmPassword) {
+    return { error: "يرجى ملء جميع حقول كلمة المرور" }
+  }
+
+  if (newPassword !== confirmPassword) {
+    return { error: "كلمتا المرور غير متطابقتين" }
+  }
+
+  if (newPassword.length < 6) {
+    return { error: "يجب أن تكون كلمة المرور 6 أحرف على الأقل" }
+  }
+
+  try {
+    const hashedPassword = await bcrypt.hash(newPassword, 10)
+    
+    await prisma.user.update({
+      where: { id: user.id },
+      data: { password: hashedPassword }
+    })
+
+    return { success: true }
+  } catch (error) {
+    console.error(error)
+    return { error: "حدث خطأ أثناء تحديث كلمة المرور" }
+  }
+}
+===== FILE: src\app\(school-manager)\school-manager\users\actions.ts =====
+"use server"
+
+import { prisma } from "@/lib/prisma"
+import { getCurrentUser } from "@/lib/permissions"
+import { revalidatePath } from "next/cache"
+import bcrypt from "bcryptjs"
+
+async function verifyConfirmation(password: string, confirmPhrase: string, actionType: "DELETE_SCHOOL" | "DELETE_USER") {
+  const user = await getCurrentUser()
+  if (!user || user.role !== "SUPER_ADMIN") {
+    await prisma.activity.create({
+      data: {
+        actorId: user?.id || "unknown",
+        action: `${actionType}_FAILED`,
+        entityType: "SYSTEM",
+        entityId: "AUTH",
+        metadata: { reason: "Unauthorized access attempt" }
+      }
+    }).catch(console.error)
+    return { error: "Unauthorized", user: null }
+  }
+  
+  if (confirmPhrase !== "DELETE") {
+    await prisma.activity.create({
+      data: {
+        actorId: user.id,
+        action: `${actionType}_FAILED`,
+        entityType: "SYSTEM",
+        entityId: "CONFIRMATION",
+        metadata: { reason: "Invalid confirmation phrase" }
+      }
+    }).catch(console.error)
+    return { error: "Invalid confirmation phrase", user: null }
+  }
+  
+  const admin = await prisma.user.findUnique({ where: { id: user.id } })
+  if (!admin || !admin.password) return { error: "Admin account error", user: null }
+  
+  const isValid = await bcrypt.compare(password, admin.password)
+  if (!isValid) {
+    await prisma.activity.create({
+      data: {
+        actorId: user.id,
+        action: `${actionType}_FAILED`,
+        entityType: "SYSTEM",
+        entityId: "PASSWORD",
+        metadata: { reason: "Invalid password" }
+      }
+    }).catch(console.error)
+    return { error: "Invalid password", user: null }
+  }
+  
+  return { error: null, user }
+}
+
+export async function deleteSchool(schoolId: string, password: string, confirmPhrase: string) {
+  const { error, user } = await verifyConfirmation(password, confirmPhrase, "DELETE_SCHOOL")
+  if (error) return { error }
+
+  const school = await prisma.school.findUnique({ where: { id: schoolId } })
+  if (!school) return { error: "School not found" }
+
+  try {
+    const usersToDelete = await prisma.user.findMany({
+      where: {
+        OR: [
+          { schoolId: schoolId },
+          { branch: { schoolId: schoolId } }
+        ],
+        role: { not: "SUPER_ADMIN" }
+      },
+      select: { id: true }
+    })
+    const userIds = usersToDelete.map(u => u.id)
+
+    await prisma.$transaction([
+      prisma.improvementAction.deleteMany({ where: { plan: { schoolId } } }),
+      prisma.improvementFollowUp.deleteMany({ where: { plan: { schoolId } } }),
+      prisma.improvementPlan.deleteMany({ where: { schoolId } }),
+      prisma.gap.deleteMany({ where: { schoolId } }),
+      prisma.evidenceResponse.deleteMany({ where: { assessment: { schoolId } } }),
+      prisma.assessmentResponse.deleteMany({ where: { assessment: { schoolId } } }),
+      prisma.assessmentAttachment.deleteMany({ where: { assessment: { schoolId } } }),
+      prisma.evidence.deleteMany({ where: { assessment: { schoolId } } }),
+      prisma.assessment.deleteMany({ where: { schoolId } }),
+      prisma.survey.deleteMany({ where: { schoolId } }),
+      prisma.user.deleteMany({ where: { id: { in: userIds } } }),
+      prisma.school.delete({ where: { id: schoolId } })
+    ])
+    
+    await prisma.activity.create({
+      data: {
+        actorId: user!.id,
+        schoolId: null,
+        action: "DELETE_SCHOOL",
+        entityType: "SCHOOL",
+        entityId: schoolId,
+        metadata: { name: school.name, deletedUsersCount: userIds.length }
+      }
+    })
+    
+    revalidatePath("/schools")
+    revalidatePath("/users")
+    return { success: true }
+  } catch (e) {
+    console.error(e)
+    return { error: "Failed to delete school due to dependencies." }
+  }
+}
+
+export async function deleteUser(userId: string, password: string, confirmPhrase: string) {
+  const { error, user } = await verifyConfirmation(password, confirmPhrase, "DELETE_USER")
+  if (error) return { error }
+
+  if (userId === user!.id) return { error: "لا يمكنك حذف حسابك الخاص." }
+
+  const targetUser = await prisma.user.findUnique({ where: { id: userId } })
+  if (!targetUser) return { error: "المستخدم غير موجود" }
+
+  if (user!.role === "SCHOOL_MANAGER") {
+    if (targetUser.schoolId !== user!.schoolId) {
+      return { error: "غير مصرح لك بحذف مستخدمين خارج مدرستك." }
+    }
+    if (targetUser.role === "SUPER_ADMIN") {
+      return { error: "لا يمكنك حذف حساب مدير النظام." }
+    }
+  } else if (user!.role !== "SUPER_ADMIN") {
+    return { error: "غير مصرح لك." }
+  }
+
+  if (targetUser.role === "SUPER_ADMIN") {
+    const superAdminCount = await prisma.user.count({ where: { role: "SUPER_ADMIN" } })
+    if (superAdminCount <= 1) return { error: "لا يمكن حذف حساب مدير النظام الوحيد المتبقي." }
+  }
+
+  try {
+    await prisma.user.delete({ where: { id: userId } })
+    
+    await prisma.activity.create({
+      data: {
+        actorId: user!.id,
+        action: "DELETE_USER",
+        entityType: "USER",
+        entityId: userId,
+        metadata: { name: targetUser.name, email: targetUser.email, role: targetUser.role }
+      }
+    })
+    
+    revalidatePath("/users")
+    revalidatePath("/school-manager/users")
+    return { success: true }
+  } catch (e) {
+    return { error: "فشل حذف المستخدم بسبب تبعيات البيانات." }
+  }
+}
+
+export async function createUser(formData: FormData) {
+  const user = await getCurrentUser()
+  if (!user || (user.role !== "SCHOOL_MANAGER" && user.role !== "BRANCH_MANAGER" && user.role !== "SUPER_ADMIN")) {
+    return { error: "غير مصرح لك بهذا الإجراء." }
+  }
+
+  const name = formData.get("name") as string
+  const email = formData.get("email") as string
+  const password = formData.get("password") as string
+  let role = formData.get("role") as string
+
+  if (!name || !email || !password) {
+    return { error: "الحقول مطلوبة" }
+  }
+
+  let branchIdToAssign: string | null = null
+
+  // فرض التسلسل الهرمي للصلاحيات + عزل النطاق (Security Enforcement)
+  if (user.role === "SCHOOL_MANAGER") {
+    if (role !== "BRANCH_MANAGER" && role !== "QUALITY_ASSESSOR") {
+      return { error: "غير مصرح لك بإنشاء هذا الدور" }
+    }
+    // الإصلاح: التحقق أن الفرع المختار يتبع مدرسة المدير العام فعلاً (كان غائباً)
+    const selectedBranchId = formData.get("branchId") as string
+    if (!selectedBranchId) {
+      return { error: "يجب اختيار فرع" }
+    }
+    const branch = await prisma.branch.findFirst({
+      where: { id: selectedBranchId, schoolId: user.schoolId! }
+    })
+    if (!branch) {
+      return { error: "الفرع غير تابع لمدرستك" }
+    }
+    branchIdToAssign = selectedBranchId
+  } else if (user.role === "BRANCH_MANAGER") {
+    // إجبار الدور ليكون مشرف فقط بغض النظر عما تم إرساله من المتصفح
+    role = "QUALITY_ASSESSOR"
+    branchIdToAssign = user.branchId
+    // معالجة الربط المزدوج: لو مدير القسم مرتبط عبر Branch.managerId فقط
+    if (!branchIdToAssign) {
+      const managed = await prisma.branch.findMany({ where: { managerId: user.id }, select: { id: true } })
+      if (managed.length === 1) branchIdToAssign = managed[0].id
+    }
+  } else {
+    // SUPER_ADMIN
+    branchIdToAssign = (formData.get("branchId") as string) || null
+  }
+
+  const existingUser = await prisma.user.findUnique({ where: { email } })
+  if (existingUser) {
+    return { error: "البريد الإلكتروني مستخدم بالفعل" }
+  }
+
+  try {
+    const hashedPassword = await bcrypt.hash(password, 10)
+
+    const newUser = await prisma.user.create({
+      data: {
+        name,
+        email,
+        password: hashedPassword,
+        role: role as any,
+        schoolId: user.schoolId,
+        branchId: branchIdToAssign,
+        status: "ACTIVE"
+      }
+    })
+
+    await prisma.activity.create({
+      data: {
+        actorId: user.id,
+        schoolId: user.schoolId,
+        branchId: branchIdToAssign,
+        action: "CREATE",
+        entityType: "USER",
+        entityId: newUser.id,
+        metadata: { name: newUser.name, email: newUser.email, role: newUser.role }
+      }
+    })
+
+    revalidatePath("/school-manager/users")
+    revalidatePath("/users")
+    
+    return { success: true }
+  } catch (error) {
+    console.error(error)
+    return { error: "حدث خطأ غير متوقع أثناء إنشاء الحساب." }
+  }
+}
+===== FILE: src\app\(school-manager)\school-manager\users\add\page.tsx =====
+"use client"
+
+import { useState } from "react"
+import { useRouter } from "next/navigation"
+import { Button } from "@/components/ui/Button"
+import { Input } from "@/components/ui/Input"
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/Select"
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/Card"
+import { createUser } from "@/features/admin/actions"
+import { Loader2, Save } from "lucide-react"
+
+export default function AddUserPage({ searchParams }: { searchParams: { role?: string } }) {
+  const router = useRouter()
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  // تحديد الأدوار بناءً على الرابط الذي تم الدخول منه
+  const userRole = searchParams.role === "BRANCH_MANAGER" ? "BRANCH_MANAGER" : "SCHOOL_MANAGER"
+  
+  const allowedRoles = userRole === "SCHOOL_MANAGER" 
+    ? [{ value: "BRANCH_MANAGER", label: "مدير قسم" }, { value: "QUALITY_ASSESSOR", label: "مشرف" }]
+    : [{ value: "QUALITY_ASSESSOR", label: "مشرف" }]
+
+  const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
+    e.preventDefault()
+    setLoading(true)
+    setError(null)
+    
+    const formData = new FormData(e.currentTarget)
+    const res = await createUser(formData)
+    
+    if (res?.error) {
+      setError(res.error)
+      setLoading(false)
+    } else if (res?.success) {
+      router.push("/school-manager/users")
+      router.refresh()
+    }
+  }
+
+  return (
+    <div className="space-y-6 max-w-2xl">
+      <PageHeader
+        title={userRole === "BRANCH_MANAGER" ? "إضافة مشرف" : "إضافة مستخدم"}
+        description="أدخل بيانات المستخدم الجديد."
+        breadcrumbs={[{ label: 'الرئيسية', href: '/school-manager' }, { label: 'المستخدمون', href: '/school-manager/users' }, { label: 'إضافة' }]}
+      />
+
+      <Card>
+        <CardContent className="p-6">
+          <form onSubmit={handleSubmit} className="space-y-4">
+            {error && <div className="p-3 bg-danger/10 text-danger rounded-lg text-sm">{error}</div>}
+            
+            <div className="space-y-1.5">
+              <label className="text-sm font-medium">الاسم الكامل</label>
+              <Input name="name" required />
+            </div>
+
+            <div className="space-y-1.5">
+              <label className="text-sm font-medium">البريد الإلكتروني</label>
+              <Input name="email" type="email" required />
+            </div>
+
+            <div className="space-y-1.5">
+              <label className="text-sm font-medium">كلمة المرور</label>
+              <Input name="password" type="password" required placeholder="6 أحرف على الأقل" />
+            </div>
+
+            {allowedRoles.length > 1 ? (
+              <div className="space-y-1.5">
+                <label className="text-sm font-medium">الدور</label>
+                <Select name="role" defaultValue={allowedRoles[0].value}>
+                  <SelectTrigger className="w-full">
+                    <SelectValue placeholder="اختر الدور" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {allowedRoles.map(r => <SelectItem key={r.value} value={r.value}>{r.label}</SelectItem>)}
+                  </SelectContent>
+                </Select>
+              </div>
+            ) : (
+              <input type="hidden" name="role" value={allowedRoles[0].value} />
+            )}
+
+            {/* حقل اختيار الفرع يظهر فقط لالمدير العام، أما مدير قسم فيتم ربطه تلقائياً في الخادم */}
+            {userRole === "SCHOOL_MANAGER" && (
+              <div className="space-y-1.5">
+                <label className="text-sm font-medium">الفرع</label>
+                <Select name="branchId" required>
+                  <SelectTrigger className="w-full">
+                    <SelectValue placeholder="اختر الفرع" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {/* سيتم تحميل الفروع ديناميكياً إذا أردت، أو يمكنك تمريرها كـ props */}
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
+
+            <div className="flex justify-end gap-2 pt-4">
+              <Button type="button" variant="ghost" onClick={() => router.back()}>إلغاء</Button>
+              <Button type="submit" disabled={loading} icon={loading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}>
+                {loading ? "جاري الحفظ..." : "حفظ المستخدم"}
+              </Button>
+            </div>
+          </form>
+        </CardContent>
+      </Card>
+    </div>
+  )
+}
+
+// استيراد PageHeader داخل الملف
+import { PageHeader } from "@/components/layout/PageHeader"
+===== NOT FOUND: src\app\(school-manager)\school-manager\users\[userId]\page.tsx =====
+===== FILE: src\app\(school-manager)\school-manager\settings\page.tsx =====
+import { getCurrentUser } from "@/lib/permissions"
+import { prisma } from "@/lib/prisma"
+import { PageHeader } from "@/components/layout/PageHeader"
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/Card"
+import { Input } from "@/components/ui/Input"
+import { Button } from "@/components/ui/Button"
+import { Badge } from "@/components/ui/Badge"
+import { Building2, ShieldCheck } from "lucide-react"
+import { SecurityForm } from "@/components/settings/SecurityForm"
+import { updateBranch } from "../branch-profile/actions"
+
+export default async function SettingsPage() {
+  const user = await getCurrentUser()
+  if (!user?.schoolId) return null
+
+  const isBranchManager = user.role === "BRANCH_MANAGER"
+
+  return (
+    <div className="space-y-6 max-w-3xl">
+      <PageHeader
+        title="الإعدادات"
+        description="إدارة بياناتك الشخصية وبيانات المؤسسة."
+        breadcrumbs={[{ label: 'الرئيسية', href: '/' }, { label: 'الإعدادات' }]}
+      />
+      
+      {/* 1. بيانات المؤسسة (تتغير حسب الدور) */}
+      {isBranchManager ? (
+        <BranchSettingsCard branchId={user.branchId!} />
+      ) : (
+        <SchoolSettingsCard schoolId={user.schoolId} />
+      )}
+
+      {/* 2. الأمان وكلمة المرور */}
+      <Card>
+        <CardHeader>
+          <CardTitle icon={<ShieldCheck className="w-5 h-5" />}>الأمان وكلمة المرور</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <SecurityForm />
+        </CardContent>
+      </Card>
+    </div>
+  )
+}
+
+// مكون بيانات المدرسة (لالمدير العام)
+async function SchoolSettingsCard({ schoolId }: { schoolId: string }) {
+  const school = await prisma.school.findUnique({
+    where: { id: schoolId },
+    select: { name: true, location: true, phone: true, officialEmail: true, description: true, status: true },
+  })
+
+  if (!school) return null
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle icon={<Building2 className="w-5 h-5" />}>بيانات المدرسة</CardTitle>
+      </CardHeader>
+      <CardContent>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div className="space-y-1.5">
+            <label className="text-sm font-medium">اسم المدرسة</label>
+            <Input defaultValue={school.name} readOnly className="bg-surface-muted" />
+          </div>
+          <div className="space-y-1.5">
+            <label className="text-sm font-medium">حالة المدرسة</label>
+            <div className="pt-2">
+              <Badge variant={school.status === "ACTIVE" ? "success" : "danger"}>
+                {school.status === "ACTIVE" ? "نشطة" : "موقوفة"}
+              </Badge>
+            </div>
+          </div>
+          <div className="space-y-1.5">
+            <label className="text-sm font-medium">البريد الرسمي</label>
+            <Input defaultValue={school.officialEmail || ""} readOnly className="bg-surface-muted" />
+          </div>
+          <div className="space-y-1.5">
+            <label className="text-sm font-medium">الهاتف</label>
+            <Input defaultValue={school.phone || ""} readOnly className="bg-surface-muted" />
+          </div>
+          <div className="space-y-1.5 md:col-span-2">
+            <label className="text-sm font-medium">الموقع</label>
+            <Input defaultValue={school.location || ""} readOnly className="bg-surface-muted" />
+          </div>
+          <div className="space-y-1.5 md:col-span-2">
+            <label className="text-sm font-medium">الوصف</label>
+            <Input defaultValue={school.description || ""} readOnly className="bg-surface-muted" />
+          </div>
+        </div>
+        <div className="mt-6 p-4 bg-surface-muted/50 rounded-lg text-sm text-muted-foreground">
+          لتعديل البيانات الأساسية للمدرسة (مثل الاسم والشعار)، يرجى التواصل مع إدارة المنصة.
+        </div>
+      </CardContent>
+    </Card>
+  )
+}
+
+// مكون بيانات الفرع (لمدير قسم)
+async function BranchSettingsCard({ branchId }: { branchId: string }) {
+  const branch = await prisma.branch.findUnique({
+    where: { id: branchId },
+    include: { school: { select: { name: true } } }
+  })
+
+  if (!branch) return null
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle icon={<Building2 className="w-5 h-5" />}>بيانات الفرع</CardTitle>
+      </CardHeader>
+      <CardContent>
+        <form action={updateBranch} className="space-y-4">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div className="space-y-1.5">
+              <label className="text-sm font-medium">اسم الفرع</label>
+              <Input name="name" defaultValue={branch.name} required />
+            </div>
+            <div className="space-y-1.5">
+              <label className="text-sm font-medium">المدرسة التابع لها</label>
+              <Input defaultValue={branch.school.name} readOnly className="bg-surface-muted" />
+            </div>
+            <div className="space-y-1.5">
+              <label className="text-sm font-medium">الهاتف</label>
+              <Input name="phone" defaultValue={branch.phone || ""} />
+            </div>
+            <div className="space-y-1.5">
+              <label className="text-sm font-medium">الموقع</label>
+              <Input name="location" defaultValue={branch.location || ""} />
+            </div>
+          </div>
+          <div className="flex justify-end pt-4">
+            <Button type="submit">حفظ التغييرات</Button>
+          </div>
+        </form>
+      </CardContent>
+    </Card>
+  )
+}
+===== FILE: src\app\(dashboard)\private-review\new\page.tsx =====
+import { prisma } from "@/lib/prisma"
+import { getCurrentUser } from "@/lib/permissions"
+import { redirect } from "next/navigation"
+import { PageHeader } from "@/components/layout/PageHeader"
+import { Card, CardContent } from "@/components/ui/Card"
+import { Button } from "@/components/ui/Button"
+import { Select } from "@/components/ui/Select"
+import { createPrivateReview } from "./actions"
+
+export default async function NewPrivateReviewPage() {
+  const user = await getCurrentUser()
+  if (!user || user.role !== "SUPER_ADMIN") redirect("/dashboard")
+
+  const schools = await prisma.school.findMany({ include: { branches: true } })
+
+  return (
+    <div className="space-y-6 max-w-2xl mx-auto">
+      <PageHeader
+        title="بدء تقييم خاص جديد"
+        description="هذا التقييم مستقل تماماً ولا يؤثر على تقارير المدرسة الرسمية أو متوسطاتها."
+        breadcrumbs={[{ label: "الرئيسية", href: "/" }, { label: "التقييم الخاص", href: "/private-review" }, { label: "جديد" }]}
+      />
+      <Card>
+        <CardContent className="p-6">
+          <form action={createPrivateReview} className="space-y-4">
+            <div className="space-y-1.5">
+              <label className="text-sm font-medium">المدرسة المستهدفة</label>
+              <Select name="schoolId" required>
+                {schools.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+              </Select>
+            </div>
+            <div className="space-y-1.5">
+              <label className="text-sm font-medium">الفرع (اختياري)</label>
+              <Select name="branchId">
+                <option value="">كامل المدرسة</option>
+                {schools.flatMap(s => s.branches).map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
+              </Select>
+            </div>
+            <div className="flex justify-end pt-4">
+              <Button type="submit">بدء التقييم الخاص</Button>
+            </div>
+          </form>
+        </CardContent>
+      </Card>
+    </div>
+  )
+}
+===== FILE: src\app\(dashboard)\private-review\new\actions.ts =====
+"use server"
+
+import { prisma } from "@/lib/prisma"
+import { getCurrentUser } from "@/lib/permissions"
+import { redirect } from "next/navigation"
+
+export async function createPrivateReview(formData: FormData) {
+  const user = await getCurrentUser()
+  if (!user || user.role !== "SUPER_ADMIN") throw new Error("Unauthorized")
+
+  const schoolId = formData.get("schoolId") as string
+  const branchId = formData.get("branchId") as string || null
+
+  const assessment = await prisma.assessment.create({
+    data: {
+      schoolId,
+      branchId,
+      assessorId: user.id,
+      status: "IN_PROGRESS",
+      type: "PRIVATE_REVIEW"
+    }
+  })
+
+  redirect(`/quality-assessor/assessments/${assessment.id}`)
+}
+===== FILE: src\components\ui\Modal.tsx =====
+"use client"
+
+import * as React from "react"
+import { cn } from "@/lib/utils"
+import { X } from "lucide-react"
+
+interface ModalProps {
+  isOpen: boolean
+  onClose: () => void
+  title: string
+  description?: string
+  children: React.ReactNode
+}
+
+export function Modal({ isOpen, onClose, title, description, children }: ModalProps) {
+  if (!isOpen) return null
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+      <div 
+        className="absolute inset-0 bg-black/50 backdrop-blur-sm" 
+        onClick={onClose} 
+      />
+      <div className="relative bg-surface rounded-lg shadow-lg w-full max-w-md max-h-[90vh] flex flex-col">
+        <div className="flex items-center justify-between p-5 border-b border-border">
+          <div>
+            <h2 className="text-lg font-semibold text-foreground">{title}</h2>
+            {description && <p className="text-sm text-muted-foreground mt-1">{description}</p>}
+          </div>
+          <button onClick={onClose} className="text-muted-foreground hover:text-foreground">
+            <X className="w-5 h-5" />
+          </button>
+        </div>
+        <div className="p-5 overflow-y-auto">
+          {children}
+        </div>
+      </div>
+    </div>
+  )
+}
+===== FILE: src\components\ui\Select.tsx =====
+"use client"
+
+import * as React from "react"
+import * as SelectPrimitive from "@radix-ui/react-select"
+import { cn } from "@/lib/utils"
+import { Check, ChevronDown } from "lucide-react"
+
+const Select = SelectPrimitive.Root
+const SelectGroup = SelectPrimitive.Group
+const SelectValue = SelectPrimitive.Value
+
+const SelectTrigger = React.forwardRef<
+  React.ElementRef<typeof SelectPrimitive.Trigger>,
+  React.ComponentPropsWithoutRef<typeof SelectPrimitive.Trigger>
+>(({ className, children, ...props }, ref) => (
+  <SelectPrimitive.Trigger
+    ref={ref}
+    className={cn(
+      "flex h-10 w-full items-center justify-between rounded-md border border-border bg-surface-muted px-3 py-2 text-sm text-foreground ring-offset-background placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50",
+      // إضافة المحاذاة لليمين (RTL)
+      "text-right flex-row-reverse",
+      className
+    )}
+    {...props}
+  >
+    {children}
+    <SelectPrimitive.Icon asChild>
+      <ChevronDown className="h-4 w-4 opacity-50 mr-auto" />
+    </SelectPrimitive.Icon>
+  </SelectPrimitive.Trigger>
+))
+SelectTrigger.displayName = SelectPrimitive.Trigger.displayName
+
+const SelectContent = React.forwardRef<
+  React.ElementRef<typeof SelectPrimitive.Content>,
+  React.ComponentPropsWithoutRef<typeof SelectPrimitive.Content>
+>(({ className, children, position = "popper", ...props }, ref) => (
+  <SelectPrimitive.Portal>
+    <SelectPrimitive.Content
+      ref={ref}
+      className={cn(
+        "relative z-50 max-h-96 min-w-[8rem] overflow-hidden rounded-md border bg-popover text-popover-foreground shadow-md",
+        // إصلاح الشفافية: إضافة خلفية صلبة (bg-white) وزيادة z-index
+        "bg-white dark:bg-zinc-900 z-[100]",
+        // إصلاح العرض: تقييد العرض للا يتجاوز عرض الشاشة
+        "w-[var(--radix-select-trigger-width)] max-w-[calc(100vw-1.5rem)]",
+        position === "popper" && "data-[side=bottom]:translate-y-1",
+        className
+      )}
+      position={position}
+      {...props}
+    >
+      <SelectPrimitive.Viewport className="p-1 max-h-[60vh] overflow-y-auto">
+        {children}
+      </SelectPrimitive.Viewport>
+    </SelectPrimitive.Content>
+  </SelectPrimitive.Portal>
+))
+SelectContent.displayName = SelectPrimitive.Content.displayName
+
+const SelectItem = React.forwardRef<
+  React.ElementRef<typeof SelectPrimitive.Item>,
+  React.ComponentPropsWithoutRef<typeof SelectPrimitive.Item>
+>(({ className, children, ...props }, ref) => (
+  <SelectPrimitive.Item
+    ref={ref}
+    className={cn(
+      "relative flex w-full cursor-default select-none items-center rounded-sm py-1.5 pl-8 pr-2 text-sm outline-none focus:bg-accent focus:text-accent-foreground data-[disabled]:pointer-events-none data-[disabled]:opacity-50",
+      // السماح بتفاف النصوص الطويلة وإضافة المحاذاة لليمين
+      "whitespace-normal break-words text-right flex-row-reverse",
+      className
+    )}
+    {...props}
+  >
+    <span className="absolute left-2 flex h-3.5 w-3.5 items-center justify-center">
+      <SelectPrimitive.ItemIndicator>
+        <Check className="h-4 w-4" />
+      </SelectPrimitive.ItemIndicator>
+    </span>
+    <SelectPrimitive.ItemText>{children}</SelectPrimitive.ItemText>
+  </SelectPrimitive.Item>
+))
+SelectItem.displayName = SelectPrimitive.Item.displayName
+
+export {
+  Select,
+  SelectGroup,
+  SelectValue,
+  SelectTrigger,
+  SelectContent,
+  SelectItem,
+}
+===== FILE: src\components\ui\Badge.tsx =====
+import * as React from "react"
+import { cn } from "@/lib/utils"
+
+type BadgeVariant = 'success' | 'warning' | 'danger' | 'info' | 'neutral' | 'violet' | 'amber'
+
+export interface BadgeProps extends React.HTMLAttributes<HTMLSpanElement> {
+  variant?: BadgeVariant
+  dot?: boolean
+}
+
+const variantStyles: Record<BadgeVariant, string> = {
+  success: "bg-success/10 text-success border-success/15",
+  warning: "bg-warning/10 text-warning border-warning/15",
+  danger:  "bg-danger/10 text-danger border-danger/15",
+  info:    "bg-secondary/10 text-secondary border-secondary/15",
+  violet:  "bg-violet/10 text-violet border-violet/15",
+  amber:   "bg-amber/10 text-amber border-amber/15",
+  neutral: "bg-surface-muted text-muted-foreground border-border",
+}
+
+const dotColor: Record<BadgeVariant, string> = {
+  success: "bg-success",
+  warning: "bg-warning",
+  danger:  "bg-danger",
+  info:    "bg-secondary",
+  violet:  "bg-violet",
+  amber:   "bg-amber",
+  neutral: "bg-muted-foreground",
+}
+
+function Badge({ className, variant = 'neutral', dot, children, ...props }: BadgeProps) {
+  return (
+    <span
+      className={cn(
+        "inline-flex items-center gap-1.5 rounded-full border px-2.5 py-0.5 text-xs font-medium leading-5",
+        variantStyles[variant],
+        className
+      )}
+      {...props}
+    >
+      {dot && <span className={cn("w-1.5 h-1.5 rounded-full", dotColor[variant])} />}
+      {children}
+    </span>
+  )
+}
+
+/* ===== Preset badges (Brief #48) ===== */
+
+const statusMap: Record<string, { label: string; variant: BadgeVariant }> = {
+  ACTIVE:         { label: 'نشط',          variant: 'success' },
+  IN_PROGRESS:    { label: 'قيد التنفيذ',  variant: 'info' },
+  COMPLETED:      { label: 'مكتمل',         variant: 'success' },
+  SUSPENDED:      { label: 'موقوف',         variant: 'danger' },
+  EXPIRED:        { label: 'منتهي',         variant: 'warning' },
+  EXPIRING_SOON:  { label: 'ينتهي قريبًا',  variant: 'warning' },
+  PENDING:        { label: 'قيد الانتظار',  variant: 'neutral' },
+  NOT_STARTED:    { label: 'لم يبدأ',       variant: 'neutral' },
+  INVITED:        { label: 'مدعو',          variant: 'info' },
+  ON_TRACK:       { label: 'على المسار',    variant: 'success' },
+  AT_RISK:        { label: 'في خطر',        variant: 'warning' },
+  DELAYED:        { label: 'متأخر',         variant: 'danger' },
+  DRAFT:          { label: 'مسودة',        variant: 'neutral' },
+}
+
+function StatusBadge({ status, ...props }: { status: string } & Omit<BadgeProps, 'variant' | 'children'>) {
+  const cfg = statusMap[status] ?? { label: status, variant: 'neutral' as BadgeVariant }
+  return <Badge variant={cfg.variant} {...props}>{cfg.label}</Badge>
+}
+
+const priorityMap: Record<string, { label: string; variant: BadgeVariant }> = {
+  HIGH:   { label: 'عالية',   variant: 'danger' },
+  MEDIUM: { label: 'متوسطة', variant: 'warning' },
+  LOW:    { label: 'منخفضة', variant: 'info' },
+}
+
+function PriorityBadge({ priority, ...props }: { priority: string } & Omit<BadgeProps, 'variant' | 'children'>) {
+  const cfg = priorityMap[priority] ?? { label: priority, variant: 'neutral' as BadgeVariant }
+  return <Badge variant={cfg.variant} {...props}>{cfg.label}</Badge>
+}
+
+export { Badge, StatusBadge, PriorityBadge }
+===== NOT FOUND: src\components\ui\Checkbox.tsx =====
+
+===== SEARCH A: createNewAssessment call sites and users actions =====
+src\features\quality-assessment\actions.ts:233:export async function createNewAssessment(stage: string) {
+src\features\quality-assessment\components\NewAssessmentStagePicker.tsx:14:import { createNewAssessment } from "@/features/quality-assessment/actions"
+src\features\quality-assessment\components\NewAssessmentStagePicker.tsx:42:      await createNewAssessment(selected)
+src\lib\permissions.ts:204:/** ┘ü╪▒╪╢ ╪¬╪«┘ê┘è┘ä ╪º┘ä┘à╪▒╪¡┘ä╪⌐ ╪╣┘å╪» ╪Ñ┘å╪┤╪º╪í ╪¬┘é┘è┘è┘à ΓÇö ┘è┘Å╪│╪¬╪»╪╣┘ë ┘à┘å createNewAssessment ╪╣┘ä┘ë ╪º┘ä╪«╪º╪»┘à */
+
+===== SEARCH B: user create/update forms (admin + school-manager users + settings) =====
+src\features\admin\actions.ts:186:    finalRole = "QUALITY_ASSESSOR"
+src\features\admin\actions.ts:198:    if (finalRole !== "BRANCH_MANAGER" && finalRole !== "QUALITY_ASSESSOR") {
+src\features\admin\actions.ts:299:  if (submittedRole && !["SUPER_ADMIN", "SCHOOL_MANAGER", "BRANCH_MANAGER", "QUALITY_ASSESSOR"].includes(submittedRole)) {
+src\features\admin\actions.ts:322:    if (submittedRole && submittedRole !== "BRANCH_MANAGER" && submittedRole !== "QUALITY_ASSESSOR") {
+src\features\admin\actions.ts:326:    // ┘à╪»┘è╪▒ ╪º┘ä┘é╪│┘à: ╪¬╪╣╪»┘è┘ä ╪¿┘è╪º┘å╪º╪¬ ╪º┘ä┘à╪┤╪▒┘ü┘è┘å (QUALITY_ASSESSOR) ╪º┘ä╪¬╪º╪¿╪╣┘è┘å ┘ä┘ü╪▒╪╣┘ç ┘ü┘é╪╖
+src\features\admin\actions.ts:330:    if (targetUser.role !== "QUALITY_ASSESSOR") {
+
+===== DONE YUSR-FILES3 =====

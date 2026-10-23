@@ -1,4 +1,4 @@
-import { PrismaClient, UserRole, UserStatus, SchoolStatus, SubscriptionStatus, AssessmentStatus, GapSeverity, GapStatus } from '@prisma/client'
+import { PrismaClient, UserRole, UserStatus, SchoolStatus, SubscriptionStatus, AssessmentStatus, GapSeverity, GapStatus, EducationalStage } from '@prisma/client'
 import bcrypt from 'bcryptjs'
 import { DATA } from './official-data'
 
@@ -50,12 +50,14 @@ async function main() {
     data: { schoolId: school1.id, name: 'الفرع الرئيسي (حي النخيل)', location: 'الرياض - حي النخيل', phone: '+966501111111', status: SchoolStatus.ACTIVE },
   })
 
+  // تعيين مراحل تعليمية لمدير القسم (قائمة متعددة) — يظهر أثرها في إنشاء التقييمات
   const branchManager = await prisma.user.create({
-    data: { name: 'أحمد العتيبي', email: 'branch@future.sch', password, role: UserRole.BRANCH_MANAGER, status: UserStatus.ACTIVE, schoolId: school1.id, branchId: branch1.id },
+    data: { name: 'أحمد العتيبي', email: 'branch@future.sch', password, role: UserRole.BRANCH_MANAGER, status: UserStatus.ACTIVE, schoolId: school1.id, branchId: branch1.id, stages: [EducationalStage.PRIMARY, EducationalStage.INTERMEDIATE] },
   })
 
+  // تعيين مراحل تعليمية للمقيّم — صارم: لا يستطيع إنشاء تقييم لمرحلة خارجها
   const assessor = await prisma.user.create({
-    data: { name: 'نورة السبيعي', email: 'assessor@future.sch', password, role: UserRole.QUALITY_ASSESSOR, status: UserStatus.ACTIVE, schoolId: school1.id, branchId: branch1.id },
+    data: { name: 'نورة السبيعي', email: 'assessor@future.sch', password, role: UserRole.QUALITY_ASSESSOR, status: UserStatus.ACTIVE, schoolId: school1.id, branchId: branch1.id, stages: [EducationalStage.PRIMARY, EducationalStage.SECONDARY] },
   })
 
   const school2 = await prisma.school.create({
@@ -129,7 +131,7 @@ async function main() {
   }
   console.log('✅ Evidence seeded successfully.')
 
-  // 6. Create Assessment
+  // 6. Create Assessment — كل تقييم ينتمي لمرحلة واحدة بالضبط
   const assessment = await prisma.assessment.create({
     data: {
       schoolId: school1.id,
@@ -137,6 +139,7 @@ async function main() {
       assessorId: assessor.id,
       status: AssessmentStatus.IN_PROGRESS,
       startedAt: new Date(),
+      stage: EducationalStage.PRIMARY,
     },
   })
 

@@ -7,7 +7,7 @@ import { Button } from "@/components/ui/Button"
 import { Badge, StatusBadge, PriorityBadge } from "@/components/ui/Badge"
 import { Progress } from "@/components/ui/Progress"
 import { EmptyState } from "@/components/ui/EmptyState"
-import { Plus, FileText, Eye, Pencil, Printer } from "lucide-react"
+import { FileText, Eye, Pencil, Printer } from "lucide-react"
 import Link from "next/link"
 import { formatDate } from "@/lib/utils"
 
@@ -30,23 +30,16 @@ export default async function FollowUpPage() {
         title="المتابعة وقياس الأثر"
         description="متابعة تنفيذ خطط التحسين وقياس أثرها."
         breadcrumbs={[{ label: 'الرئيسية', href: '/' }, { label: 'المتابعة والأثر' }]}
-        actions={
-          isAssessor ? (
-            <Link href="/school-manager/quality/improvement-plans/new">
-              <Button variant="primary" size="md" icon={<Plus className="w-4 h-4" />}>خطة جديدة</Button>
-            </Link>
-          ) : undefined
-        }
       />
 
       <Card className="overflow-hidden">
         <CardContent className="p-0">
           {plans.length === 0 ? (
-            <EmptyState 
-              icon={<FileText className="w-10 h-10 text-muted-foreground" />} 
-              title="لا توجد خطط تحسين" 
-              description="لم يتم إنشاء أي خطة بعد." 
-              compact 
+            <EmptyState
+              icon={<FileText className="w-10 h-10 text-muted-foreground" />}
+              title="لا توجد خطط تحسين"
+              description="لم يتم إنشاء أي خطة بعد."
+              compact
               className="py-12"
             />
           ) : (

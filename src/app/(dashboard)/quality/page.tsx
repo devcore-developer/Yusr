@@ -1,4 +1,6 @@
 import { getPlatformAnalytics } from "@/features/quality-reports/services/analytics"
+import { getCurrentUser } from "@/lib/permissions"
+import { redirect } from "next/navigation"
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/Card"
 import { Badge } from "@/components/ui/Badge"
 import { Progress } from "@/components/ui/Progress"
@@ -8,6 +10,15 @@ import Link from "next/link"
 import { formatDate } from "@/lib/utils"
 
 export default async function SuperAdminQualityPage() {
+  const user = await getCurrentUser()
+  if (!user) redirect("/login")
+
+  // بوابة الدور: تحليلات المنصة الشاملة لمدير النظام فقط —
+  // (الخدمة نفسها ترمي Forbidden لغيره؛ هنا نوجّه لطيفًا بدل شاشة الخطأ)
+  if (user.role !== "SUPER_ADMIN") {
+    redirect("/dashboard")
+  }
+
   const data = await getPlatformAnalytics()
 
   return (

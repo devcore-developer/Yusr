@@ -1,4 +1,7 @@
+// ===== FILE: src/features/quality-reports/services/analytics.ts =====
 import { prisma } from "@/lib/prisma"
+import { getCurrentUser, getAuthorizedBranchIds } from "@/lib/permissions"
+import { countDistinctVerifiedEvidence } from "@/features/quality-reports/services/weighted-score"
 
 export interface AssessmentScore {
   id: string
@@ -33,16 +36,30 @@ export interface BranchAnalytics {
   assessments: AssessmentScore[]
 }
 
+// الإصلاح الأمني: هذه الخدمة كانت مكشوفة لأي مستخدم مسجل عبر صفحة /quality
+// (بينما النسخة الموازية في quality-assessment/services/analysis.ts محمية).
+// إحصائيات المنصة الشاملة (كل المدارس) لمدير النظام فقط.
 export async function getPlatformAnalytics() {
-  const [schools, branches, assessments, gaps, totalEvidence, verifiedEvidence] = await Promise.all([
+  const user = await getCurrentUser()
+  if (!user || user.role !== "SUPER_ADMIN") {
+    throw new Error("Forbidden")
+  }
+
+  const [schools, branches, assessments, gaps, totalEvidence, verifiedRows] = await Promise.all([
     prisma.school.count(),
     prisma.branch.count(),
     prisma.assessment.findMany({ include: { school: true, branch: true, _count: { select: { gaps: true } } }, orderBy: { startedAt: "desc" }, take: 10 }),
     prisma.gap.findMany({ include: { school: true, branch: true, indicator: true } }),
     prisma.fixedEvidence.count(),
-    prisma.evidenceResponse.count({ where: { isVerified: true } })
+    // (إصلاح التضخم) شواهد مميزة متحققة عبر المنصة — لا صفوف الزيارات المتعددة
+    prisma.evidenceResponse.findMany({
+      where: { isVerified: true },
+      select: { evidenceId: true },
+      distinct: ["evidenceId"],
+    }),
   ])
 
+  const verifiedEvidence = verifiedRows.length
   const responseCoverage = totalEvidence > 0 ? Math.round((verifiedEvidence / totalEvidence) * 100) : 0
 
   return {
@@ -60,6 +77,13 @@ export async function getPlatformAnalytics() {
 }
 
 export async function getSchoolAnalytics(schoolId: string): Promise<BranchAnalytics> {
+  // الحراسة (مطابقة لنسخة analysis.ts): تحليلات المدرسة لمدير النظام أو مدير مدرستها فقط
+  const user = await getCurrentUser()
+  if (!user) throw new Error("Unauthorized")
+  if (user.role !== "SUPER_ADMIN" && !(user.role === "SCHOOL_MANAGER" && user.schoolId === schoolId)) {
+    throw new Error("Forbidden")
+  }
+
   const totalEvidence = await prisma.fixedEvidence.count()
   const assessments = await prisma.assessment.findMany({
     where: { schoolId, type: "NORMAL", status: { in: ["IN_PROGRESS", "COMPLETED"] } },
@@ -90,11 +114,12 @@ export async function getSchoolAnalytics(schoolId: string): Promise<BranchAnalyt
   const mapped: AssessmentScore[] = assessments.map(a => ({
     id: a.id,
     status: a.status,
-    score: totalEvidence > 0 ? Math.round((a.evidenceResponses.length / totalEvidence) * 100) : 0,
+    // (إصلاح التضخم) المتحقق = شواهد مميزة (distinct evidenceId) لا صفوف استجابات
+    score: totalEvidence > 0 ? Math.round((countDistinctVerifiedEvidence(a.evidenceResponses) / totalEvidence) * 100) : 0,
     evaluatorId: a.assessor?.id ?? "unknown",
     evaluatorName: a.assessor?.name ?? "غير محدد",
     evaluatorRole: a.assessor?.role ?? "غير محدد",
-    verifiedCount: a.evidenceResponses.length,
+    verifiedCount: countDistinctVerifiedEvidence(a.evidenceResponses),
     totalEvidence,
     branchId: a.branchId,
     branchName: a.branch?.name || "كامل المدرسة"
@@ -148,6 +173,28 @@ export async function getSchoolAnalytics(schoolId: string): Promise<BranchAnalyt
 }
 
 export async function getBranchAnalytics(branchId: string): Promise<BranchAnalytics> {
+  // الحراسة (مطابقة لنسخة analysis.ts): تحليلات الفرع لمدير النظام، أو مدير مدرسة يضم الفرع،
+  // أو مدير قسم يملك الفرع — وممنوعة على مقيّم الجودة وأي دور آخر
+  // (تحليلات الفرع تكشف أداء باقي المقيّمين — ليست من تقارير المقيّم نفسه)
+  const user = await getCurrentUser()
+  if (!user) throw new Error("Unauthorized")
+
+  if (user.role !== "SUPER_ADMIN") {
+    if (user.role === "SCHOOL_MANAGER") {
+      const branch = await prisma.branch.findUnique({
+        where: { id: branchId },
+        select: { schoolId: true }
+      })
+      if (!branch || branch.schoolId !== user.schoolId) throw new Error("Forbidden")
+    } else if (user.role === "BRANCH_MANAGER") {
+      const authorizedBranchIds = await getAuthorizedBranchIds(user)
+      if (!authorizedBranchIds.includes(branchId)) throw new Error("Forbidden")
+    } else {
+      // QUALITY_ASSESSOR وأي دور آخر
+      throw new Error("Forbidden")
+    }
+  }
+
   const totalEvidence = await prisma.fixedEvidence.count()
   const assessments = await prisma.assessment.findMany({
     where: { branchId, type: "NORMAL", status: { in: ["IN_PROGRESS", "COMPLETED"] } },
@@ -177,11 +224,12 @@ export async function getBranchAnalytics(branchId: string): Promise<BranchAnalyt
   const mapped: AssessmentScore[] = assessments.map(a => ({
     id: a.id,
     status: a.status,
-    score: totalEvidence > 0 ? Math.round((a.evidenceResponses.length / totalEvidence) * 100) : 0,
+    // (إصلاح التضخم) المتحقق = شواهد مميزة (distinct evidenceId) لا صفوف استجابات
+    score: totalEvidence > 0 ? Math.round((countDistinctVerifiedEvidence(a.evidenceResponses) / totalEvidence) * 100) : 0,
     evaluatorId: a.assessor?.id ?? "unknown",
     evaluatorName: a.assessor?.name ?? "غير محدد",
     evaluatorRole: a.assessor?.role ?? "غير محدد",
-    verifiedCount: a.evidenceResponses.length,
+    verifiedCount: countDistinctVerifiedEvidence(a.evidenceResponses),
     totalEvidence
   }))
 

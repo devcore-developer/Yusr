@@ -1,3 +1,4 @@
+// ===== FILE: src/app/(dashboard)/settings/page.tsx =====
 import { prisma } from "@/lib/prisma"
 import { getCurrentUser } from "@/lib/permissions"
 import { redirect } from "next/navigation"
@@ -9,7 +10,9 @@ import { Avatar } from "@/components/ui/Avatar"
 import { Badge } from "@/components/ui/Badge"
 import { updateProfile, updatePassword } from "./actions"
 import { BackupSection } from "@/components/settings/BackupSection"
-import { User, Shield, Database } from "lucide-react"
+import { MyStagesEditor } from "@/components/settings/MyStagesEditor"
+import { getStageLabel } from "@/lib/stages"
+import { User, Shield, Database, GraduationCap } from "lucide-react"
 
 export const metadata = { title: "الإعدادات" }
 
@@ -26,6 +29,10 @@ export default async function SettingsPage() {
   const backupHistory = isSuperAdmin 
     ? await prisma.backupHistory.findMany({ orderBy: { createdAt: "desc" }, take: 10 }) 
     : []
+
+  // المراحل التعليمية للحساب — عرض فقط (التعديل يتم من إدارة المستخدمين بواسطة الإدارة)
+  const stageUnlimited = user.role === "SUPER_ADMIN" || user.role === "SCHOOL_MANAGER"
+  const myStages = Array.isArray(dbUser.stages) ? dbUser.stages : []
 
   return (
     <div className="space-y-6 max-w-5xl">
@@ -66,6 +73,41 @@ export default async function SettingsPage() {
           </CardContent>
         </Card>
       )}
+
+      {/* قسم المراحل التعليمية — (هذه المهمة) مقيّم الجودة يعدّل مراحل حسابه من هنا
+          (معالجة الحسابات القائمة بلا تعيين دون إعادة إنشائها)، وباقي الأدوار عرض فقط
+          كما هو: SA/SM غير مقيّدين أصلًا، وBM تُدار تعييناته من الإدارة. */}
+      <Card variant="primary">
+        <CardHeader>
+          <CardTitle icon={<GraduationCap className="w-5 h-5" />}>المراحل التعليمية</CardTitle>
+          <CardDescription>المراحل المصرح بها لحسابك عند إنشاء التقييمات</CardDescription>
+        </CardHeader>
+        <CardContent>
+          {stageUnlimited ? (
+            <p className="text-sm text-muted-foreground">
+              حسابك غير مقيّد بمراحل محددة — يمكنك العمل في جميع المراحل التعليمية الخمس.
+            </p>
+          ) : isAssessor ? (
+            /* (جديد) محرّر قابل للحفظ — يخزن في قاعدة البيانات ويظهر فورًا بعد التحديث */
+            <MyStagesEditor defaultSelected={myStages} />
+          ) : myStages.length > 0 ? (
+            <div className="flex flex-wrap gap-2">
+              {myStages.map(s => (
+                <Badge key={s} variant="info">{getStageLabel(s)}</Badge>
+              ))}
+            </div>
+          ) : (
+            <p className="text-sm text-warning">
+              لم تُعيَّن أي مراحل تعليمية لحسابك بعد — تواصل مع مديرك لتعيين المراحل المسموح لك بتقييمها.
+            </p>
+          )}
+          {!isAssessor && (
+            <p className="text-[12px] text-muted-foreground mt-3">
+              تُدار هذه التعيينات من قبل الإدارة عبر صفحة المستخدمين (عرض فقط هنا).
+            </p>
+          )}
+        </CardContent>
+      </Card>
 
       <Card variant="primary">
         <CardHeader>

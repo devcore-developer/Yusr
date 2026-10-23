@@ -1,15 +1,18 @@
 import { prisma } from "@/lib/prisma"
-import { getCurrentUser, getAuthorizedBranchIds } from "@/lib/permissions"
+import { getCurrentUser, getAuthorizedBranchIds, getUserStageGrant } from "@/lib/permissions"
 import { Card, CardContent } from "@/components/ui/Card"
 import { Button } from "@/components/ui/Button"
 import { Badge } from "@/components/ui/Badge"
 import { Progress } from "@/components/ui/Progress"
 import { PageHeader } from "@/components/layout/PageHeader"
+import { NewAssessmentStagePicker } from "@/features/quality-assessment/components/NewAssessmentStagePicker"
+import { getStageLabel, getStageOptions } from "@/lib/stages"
+import { AcademicYearBadge } from "@/components/academic-years/AcademicYearBadge"
+import { getActiveAcademicYearForSchool } from "@/features/academic-years/queries"
 import Link from "next/link"
 import { formatDate } from "@/lib/utils"
-import { ClipboardCheck, CheckCircle, Clock, ArrowLeft, Plus } from "lucide-react"
+import { ClipboardCheck, CheckCircle, Clock, ArrowLeft } from "lucide-react"
 import { AssessmentComparisonSelector } from "@/features/quality-assessment/components/AssessmentComparisonSelector"
-import { createNewAssessment } from "@/features/quality-assessment/actions"
 
 export default async function AssessorDashboard() {
   const user = await getCurrentUser()
@@ -46,6 +49,19 @@ export default async function AssessorDashboard() {
   const isSuperAdmin = user.role === "SUPER_ADMIN"
   const canCreate = ["QUALITY_ASSESSOR", "SCHOOL_MANAGER", "BRANCH_MANAGER"].includes(user.role)
 
+  // المراحل المسموح بها عند إنشاء تقييم — تُحسب على الخادم حسب الدور والتعيينات
+  // (المقيّم بلا تعيينات يحصل على زر معطّل مع سبب واضح)
+  const grant = getUserStageGrant(user)
+  const pickerStages = grant.mode === "ALL" ? getStageOptions() : grant.stages.map(id => ({ id, label: getStageLabel(id) }))
+  const blockedReason =
+    grant.mode === "LIMITED" && grant.stages.length === 0
+      ? "لم يتم تعيين أي مراحل تعليمية لحسابك — تواصل مع مدير النظام لتعيين المراحل قبل إنشاء تقييم."
+      : undefined
+
+  // العام الدراسي النشط لمدرسة الحساب — معلومة سياقية للعرض فقط (§2):
+  // لا تُغيّر أي ارتباط مخزّن، ومدير النظام بلا مدرسة محددة لا يُعرض له شارة.
+  const activeYear = await getActiveAcademicYearForSchool(user.schoolId)
+
   return (
     <div className="space-y-8">
       <PageHeader
@@ -53,13 +69,12 @@ export default async function AssessorDashboard() {
         description={isSuperAdmin ? "استعراض جميع تقييمات الجودة المسجلة في المنصة." : `أهلاً بك، ${user.name}. يمكنك متابعة التقييمات وإكمالها.`}
         breadcrumbs={[{ label: 'الرئيسية', href: '/' }, { label: 'التقييمات' }]}
         actions={
-          canCreate ? (
-            <form action={createNewAssessment}>
-              <Button type="submit" variant="primary" size="md" icon={<Plus className="w-4 h-4" />}>
-                تقييم جديد
-              </Button>
-            </form>
-          ) : undefined
+          <div className="flex items-center gap-3">
+            <AcademicYearBadge year={activeYear} />
+            {canCreate ? (
+              <NewAssessmentStagePicker stages={pickerStages} blockedReason={blockedReason} />
+            ) : undefined}
+          </div>
         }
       />
 
@@ -109,6 +124,7 @@ export default async function AssessorDashboard() {
                   <tr>
                     <th className="px-5 py-3 font-medium">المدرسة</th>
                     <th className="px-5 py-3 font-medium">الفرع</th>
+                    <th className="px-5 py-3 font-medium">المرحلة</th>
                     <th className="px-5 py-3 font-medium">المُقيّم</th>
                     <th className="px-5 py-3 font-medium">الدور</th>
                     <th className="px-5 py-3 font-medium">التقدم</th>
@@ -122,6 +138,9 @@ export default async function AssessorDashboard() {
                     <tr key={a.id} className="hover:bg-surface-muted/50 transition-smooth">
                       <td className="px-5 py-4 font-medium text-foreground-strong">{a.school.name}</td>
                       <td className="px-5 py-4 text-muted-foreground">{a.branch?.name || "-"}</td>
+                      <td className="px-5 py-4">
+                        <Badge variant={a.stage ? "info" : "neutral"}>{getStageLabel(a.stage)}</Badge>
+                      </td>
                       <td className="px-5 py-4 text-foreground-strong">{a.assessor?.name || "غير محدد"}</td>
                       <td className="px-5 py-4">
                         <Badge variant={

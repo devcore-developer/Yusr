@@ -52,6 +52,15 @@ enum GapStatus {
   RESOLVED
 }
 
+enum EducationalStage {
+  KINDERGARTEN
+  PRIMARY
+  INTERMEDIATE
+  SECONDARY
+  SPECIAL_EDUCATION
+}
+
+
 model User {
   id            String     @id @default(cuid())
   name          String
@@ -60,6 +69,7 @@ model User {
   role          UserRole
   status        UserStatus @default(ACTIVE)
   schoolId      String?
+  stages        EducationalStage[]
   branchId      String?
   createdAt     DateTime   @default(now())
   updatedAt     DateTime   @updatedAt
@@ -70,11 +80,12 @@ model User {
   managedBranches Branch[] @relation("BranchManager")
   assessments   Assessment[]
   activities    Activity[]
-  
+
   plansCreated    ImprovementPlan[] @relation("CreatedPlans")
   actionsAssigned ImprovementAction[] @relation("AssignedActions")
   followUpsCreated ImprovementFollowUp[] @relation("CreatedFollowUps")
   evidenceUploaded Evidence[] @relation("UploadedEvidence")
+  surveyIntegrationConfigs SurveyIntegrationConfig[] @relation("SurveyConfigApprover")
 
   @@index([schoolId])
   @@index([branchId])
@@ -109,7 +120,8 @@ model School {
   buildingCount Int?
   capacity      Int?
   internalNotes String?
-  
+  academicYears AcademicYear[]
+
   status        SchoolStatus @default(ACTIVE)
   createdAt     DateTime     @default(now())
   updatedAt     DateTime     @updatedAt
@@ -122,6 +134,7 @@ model School {
   plans         ImprovementPlan[]
   activities    Activity[]
   surveys       Survey[]
+  surveyIntegrationConfigs SurveyIntegrationConfig[]
 }
 
 model Branch {
@@ -194,14 +207,15 @@ model Indicator {
   coverage      String?    @default("مغطى")
   evidenceCount Int        @default(0)
   paragraphCount Int       @default(0)
-  
+
   domain        Domain     @relation(fields: [domainId], references: [id])
   axis          Axis       @relation(fields: [axisId], references: [id])
   tools         AssessmentTool[] @relation("IndicatorTools")
-  
+
   responses     AssessmentResponse[]
   gaps          Gap[]
   fixedEvidence FixedEvidence[]
+  surveys       Survey[]
 }
 
 model FixedEvidence {
@@ -230,6 +244,7 @@ model Assessment {
   createdAt     DateTime         @default(now())
   updatedAt     DateTime         @updatedAt
   submittedAt   DateTime?
+  stage         EducationalStage?
   cycle         String?   @default("2024-2025")
   school        School           @relation(fields: [schoolId], references: [id], onDelete: Cascade)
   branch        Branch?          @relation(fields: [branchId], references: [id], onDelete: SetNull)
@@ -241,6 +256,8 @@ model Assessment {
   evidence      Evidence[]
   plans         ImprovementPlan[]
   type          String   @default("NORMAL")
+  academicYearId String?
+  academicYear   AcademicYear? @relation(fields: [academicYearId], references: [id], onDelete: SetNull)
 
   @@index([assessorId])
   @@index([schoolId, branchId, status])
@@ -318,7 +335,8 @@ model ImprovementPlan {
   createdById   String?
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt
-
+  academicYearId String?
+  academicYear   AcademicYear? @relation(fields: [academicYearId], references: [id], onDelete: SetNull)
   baseline          Float?
   targetPercentage  Float?
   currentMeasured   Float?
@@ -327,7 +345,8 @@ model ImprovementPlan {
   requiredSupport   String?
   followUpMethod    String?
   impactNotes       String?
-  
+  kind              String   @default("IMPROVEMENT")
+  evidenceScore     Float?
   reasons           String?
   strengths         String?
   improvements      String?
@@ -336,7 +355,7 @@ model ImprovementPlan {
   branch        Branch?  @relation(fields: [branchId], references: [id], onDelete: SetNull)
   assessment    Assessment? @relation(fields: [assessmentId], references: [id], onDelete: SetNull)
   gap           Gap?     @relation(fields: [gapId], references: [id], onDelete: SetNull)
-  createdBy     User?     @relation("CreatedPlans", fields: [createdById], references: [id], onDelete: SetNull)
+  createdBy     User?    @relation("CreatedPlans", fields: [createdById], references: [id], onDelete: SetNull)
   actions       ImprovementAction[]
   followUps     ImprovementFollowUp[]
 
@@ -406,14 +425,14 @@ model Evidence {
   id            String     @id @default(cuid())
   assessmentId  String
   uploadedById  String?
-  type          String     
+  type          String
   name          String
   url           String
   createdAt     DateTime   @default(now())
 
   assessment    Assessment @relation(fields: [assessmentId], references: [id], onDelete: Cascade)
   uploader      User?       @relation("UploadedEvidence", fields: [uploadedById], references: [id], onDelete: SetNull)
-  
+
   @@index([assessmentId])
 }
 
@@ -438,9 +457,38 @@ model Survey {
   note          String?
   schoolId      String?
   generalResult String?
+  // (تكامل الاستبانات) عدد الاستجابات المسجل يدويًا — null = غير مسجل، لا يُختلع ولا يُصنَّع
+  respondents   Int?
   createdAt     DateTime @default(now())
 
   school        School?  @relation(fields: [schoolId], references: [id], onDelete: SetNull)
+  // (تكامل الاستبانات) علاقة حقيقية على العمود القائم indicatorId (كان نصيًا بلا علاقة).
+  // حذف المؤشر لا يحذف الاستبانة (SetNull) — والسجلات التاريخية تنجو كما هي.
+  indicator     Indicator? @relation(fields: [indicatorId], references: [id], onDelete: SetNull)
+
+  @@index([schoolId])
+  @@index([indicatorId])
+}
+
+// (تكامل الاستبانات) إعداد النتيجة المدمجة — صف واحد لكل مدرسة
+// (وجوده = معتمد، حذفه = «غير مُهيَّأة»). الأوزان كسور 0..1 ومجموعهما 1
+// — يتحقق منها الخادم قبل الحفظ، ولا يوجد وزن افتراضي إطلاقًا.
+// method وapprovedBy والتواريخ = سجل تدقيق يظهر مع كل نتيجة مدمجة معروضة.
+model SurveyIntegrationConfig {
+  id           String   @id @default(cuid())
+  schoolId     String
+  toolWeight   Float
+  surveyWeight Float
+  method       String   @default("WEIGHTED_AVERAGE")
+  note         String?
+  approvedById String?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  school     School @relation(fields: [schoolId], references: [id], onDelete: Cascade)
+  approvedBy User?  @relation("SurveyConfigApprover", fields: [approvedById], references: [id], onDelete: SetNull)
+
+  @@unique([schoolId])
 }
 
 model BackupHistory {
@@ -488,7 +536,24 @@ model AssessmentAttachment {
 
   assessment    Assessment @relation(fields: [assessmentId], references: [id], onDelete: Cascade)
   uploader      User?       @relation("UploadedAttachments", fields: [uploadedById], references: [id], onDelete: SetNull)
-  
+
   @@index([assessmentId])
   @@index([evidenceId])
+}
+
+model AcademicYear {
+  id        String   @id @default(cuid())
+  schoolId  String
+  startYear Int      // السنة الهجرية التي يبدأ بها العام الدراسي (1448 تعني «1448–1449 هـ»)
+  label     String   // «1448–1449 هـ» — يُولَّد خادميًا ويُخزَّن لعرض موحّد
+  isActive  Boolean  @default(false)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  school           School            @relation(fields: [schoolId], references: [id], onDelete: Cascade)
+  assessments      Assessment[]
+  improvementPlans ImprovementPlan[]
+
+  @@unique([schoolId, startYear])
+  @@index([schoolId, isActive])
 }

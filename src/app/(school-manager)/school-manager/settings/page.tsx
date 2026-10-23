@@ -1,19 +1,47 @@
 import { getCurrentUser } from "@/lib/permissions"
 import { prisma } from "@/lib/prisma"
 import { PageHeader } from "@/components/layout/PageHeader"
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/Card"
+import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/Card"
 import { Input } from "@/components/ui/Input"
 import { Button } from "@/components/ui/Button"
 import { Badge } from "@/components/ui/Badge"
-import { Building2, ShieldCheck } from "lucide-react"
+import { Building2, ShieldCheck, GraduationCap, CalendarDays } from "lucide-react"
 import { SecurityForm } from "@/components/settings/SecurityForm"
 import { updateBranch } from "../branch-profile/actions"
+import { getStageLabel } from "@/lib/stages"
+import { AcademicYearManager, type ManagerYearRow } from "@/components/academic-years/AcademicYearManager"
+import { suggestAcademicYearStart } from "@/lib/academic-year"
 
 export default async function SettingsPage() {
   const user = await getCurrentUser()
   if (!user?.schoolId) return null
 
   const isBranchManager = user.role === "BRANCH_MANAGER"
+  const isSchoolManager = user.role === "SCHOOL_MANAGER"
+
+  // إدارة الأعوام الدراسية — مدير المدرسة فقط (§1.2): بيانات مدرسته هو فقط
+  const yearRows = isSchoolManager
+    ? await prisma.academicYear.findMany({
+        where: { schoolId: user.schoolId },
+        orderBy: { startYear: "desc" },
+        select: {
+          id: true,
+          label: true,
+          startYear: true,
+          isActive: true,
+          _count: { select: { assessments: true, improvementPlans: true } }
+        }
+      })
+    : []
+  const managerYears: ManagerYearRow[] = yearRows.map(y => ({
+    id: y.id,
+    label: y.label,
+    startYear: y.startYear,
+    isActive: y.isActive,
+    assessmentCount: y._count.assessments,
+    planCount: y._count.improvementPlans
+  }))
+  const suggestedStartYear = isSchoolManager ? suggestAcademicYearStart() : null
 
   return (
     <div className="space-y-6 max-w-3xl">
@@ -30,6 +58,31 @@ export default async function SettingsPage() {
         <SchoolSettingsCard schoolId={user.schoolId} />
       )}
 
+      {/* 1.4 العام الدراسي الهجري — إدارة مدير المدرسة (عام نشط واحد لكل مدرسة) */}
+      {isSchoolManager && (
+        <Card variant="primary">
+          <CardHeader>
+            <CardTitle icon={<CalendarDays className="w-5 h-5" />}>العام الدراسي الهجري</CardTitle>
+            <CardDescription>
+              إنشاء الأعوام الدراسية لمدرستك وتحديد العام النشط — التقييمات الجديدة ترتبط بالعام النشط وقت إنشائها.
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <AcademicYearManager
+              schoolId={user.schoolId}
+              years={managerYears}
+              suggestedStartYear={suggestedStartYear}
+            />
+          </CardContent>
+        </Card>
+      )}
+
+      {/* 1.5 المراحل التعليمية — عرض فقط (§2): تُدار التعيينات من إدارة المستخدمين */}
+      <StageInfoCard
+        role={user.role}
+        stages={Array.isArray(user.stages) ? user.stages : []}
+      />
+
       {/* 2. الأمان وكلمة المرور */}
       <Card>
         <CardHeader>
@@ -40,6 +93,38 @@ export default async function SettingsPage() {
         </CardContent>
       </Card>
     </div>
+  )
+}
+
+// بطاقة المراحل التعليمية للحساب — عرض فقط
+function StageInfoCard({ role, stages }: { role: string; stages: string[] }) {
+  const unlimited = role === "SUPER_ADMIN" || role === "SCHOOL_MANAGER"
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle icon={<GraduationCap className="w-5 h-5" />}>المراحل التعليمية</CardTitle>
+      </CardHeader>
+      <CardContent>
+        {unlimited ? (
+          <p className="text-sm text-muted-foreground">
+            حسابك غير مقيّد بمراحل محددة — يمكنك العمل في جميع المراحل التعليمية الخمس.
+          </p>
+        ) : stages.length > 0 ? (
+          <div className="flex flex-wrap gap-2">
+            {stages.map(s => (
+              <Badge key={s} variant="info">{getStageLabel(s)}</Badge>
+            ))}
+          </div>
+        ) : (
+          <p className="text-sm text-warning">
+            لم تُعيَّن أي مراحل تعليمية لحسابك بعد — تواصل مع مديرك لتعيين المراحل المسموح لك بتقييمها.
+          </p>
+        )}
+        <p className="text-[12px] text-muted-foreground mt-3">
+          تُدار هذه التعيينات من قبل الإدارة عبر صفحة المستخدمين (عرض فقط هنا).
+        </p>
+      </CardContent>
+    </Card>
   )
 }
 

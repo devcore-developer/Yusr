@@ -1,3 +1,4 @@
+// ===== FILE: src/features/quality-assessment/components/AssessmentEngine.tsx =====
 "use client"
 
 import { useState, useMemo, useEffect } from "react"
@@ -9,10 +10,11 @@ import { Modal } from "@/components/ui/Modal"
 import { cn } from "@/lib/utils"
 import { saveEvidenceResponse, finishAssessment, uploadAttachment, deleteAttachment } from "../actions"
 import {
-  CheckCircle, Menu, X, ClipboardCheck, Building2, 
-  Loader2, Hash, Wrench, Calendar, ChevronDown, 
-  Upload, Trash2, FileText
+  CheckCircle, Menu, X, ClipboardCheck, Building2,
+  Loader2, Hash, Wrench, Calendar, ChevronDown,
+  Upload, Trash2, FileText, BarChart2
 } from "lucide-react"
+import Link from "next/link"
 
 interface AssessmentEngineProps {
   assessment: any
@@ -22,6 +24,9 @@ interface AssessmentEngineProps {
   initialAttachments: any[]
   userRole?: string
   userId?: string
+  // (جديد، اختياري) عدد الاستبانات المرتبطة صراحةً بكل بند (indicatorId → العدد)
+  // تُحسب على الخادم لكل المقيَّدات بنطاق المدرسة — غياب الخاصية = لا شارات ولا أي تغيير
+  surveyLinkCounts?: Record<string, number>
 }
 
 const TOOLS = [
@@ -34,7 +39,7 @@ const TOOLS = [
   "مقابلة الموجه الطلابي"
 ]
 
-export function AssessmentEngine({ assessment, domains, initialEvidenceResponses, initialNotesResponses, initialAttachments, userRole, userId }: AssessmentEngineProps) {
+export function AssessmentEngine({ assessment, domains, initialEvidenceResponses, initialNotesResponses, initialAttachments, userRole, userId, surveyLinkCounts }: AssessmentEngineProps) {
   const [activeTool, setActiveTool] = useState(TOOLS[0])
   const [activeVisit, setActiveVisit] = useState(1)
   const [responses, setResponses] = useState<Map<string, any>>(
@@ -44,7 +49,7 @@ export function AssessmentEngine({ assessment, domains, initialEvidenceResponses
   const [savingId, setSavingId] = useState<string | null>(null)
   const [isFinishOpen, setIsFinishOpen] = useState(false)
   const [detailsEvidence, setDetailsEvidence] = useState<any | null>(null)
-  
+
   // إدارة حالة الطي للفقرات
   const [collapsedParagraphs, setCollapsedParagraphs] = useState<Set<string>>(new Set())
 
@@ -68,12 +73,12 @@ export function AssessmentEngine({ assessment, domains, initialEvidenceResponses
     return TOOLS.map(toolName => {
       const evidence = allEvidence.filter((e: any) => e.tool === toolName)
       const groupedByIndicator: Record<string, any> = {}
-      
+
       evidence.forEach((ev: any) => {
         const ind = allIndicators.find((i: any) => i.id === ev.indicatorId)
         if (!ind) return
         if (!groupedByIndicator[ind.code]) groupedByIndicator[ind.code] = { indicator: ind, paragraphs: [] }
-        
+
         const pNo = Number(ev.paragraphNo) || 0
         let para = groupedByIndicator[ind.code].paragraphs.find((p: any) => p.no === pNo)
         if (!para) {
@@ -82,7 +87,7 @@ export function AssessmentEngine({ assessment, domains, initialEvidenceResponses
         }
         para.items.push(ev)
       })
-      
+
       const groupedArray = Object.values(groupedByIndicator)
 
       groupedArray.sort((a: any, b: any) => {
@@ -94,7 +99,7 @@ export function AssessmentEngine({ assessment, domains, initialEvidenceResponses
       groupedArray.forEach((g: any) => {
         g.paragraphs.sort((a: any, b: any) => Number(a.no) - Number(b.no))
       })
-      
+
       return { name: toolName, evidence, grouped: groupedArray }
     })
   }, [allEvidence, allIndicators])
@@ -105,7 +110,7 @@ export function AssessmentEngine({ assessment, domains, initialEvidenceResponses
     if (isReadOnly) return
     const visit = activeTool === "الملاحظة الصفية" ? activeVisit : 0
     const key = `${evidenceId}-${visit}`
-    
+
     setResponses(prev => {
       const newMap = new Map(prev)
       if (checked || scoreValue) newMap.set(key, { evidenceId, visitNumber: visit, isVerified: true, scoreValue })
@@ -163,7 +168,11 @@ export function AssessmentEngine({ assessment, domains, initialEvidenceResponses
   }
 
   const totalEvidence = allEvidence.length
-  const verifiedCount = Array.from(responses.values()).filter(r => r.isVerified).length
+  // (إصلاح التضخم) الشواهد المميزة المتحققة — صف الزيارة الإضافي لنفس شاهد
+  // الملاحظة الصفية لا يضاعف الشاهد، فتبقى النسبة ضمن 0-100 وتطابق الخادم
+  const verifiedCount = new Set(
+    Array.from(responses.values()).filter(r => r.isVerified).map((r: any) => r.evidenceId)
+  ).size
   const progress = totalEvidence > 0 ? Math.round((verifiedCount / totalEvidence) * 100) : 0
 
   const handleFinish = async () => {
@@ -260,8 +269,19 @@ export function AssessmentEngine({ assessment, domains, initialEvidenceResponses
                         <Badge variant="neutral" className="font-mono numeric shrink-0 text-[11px] mt-0.5">{group.indicator.code}</Badge>
                         <p className="text-[14px] text-foreground-strong leading-relaxed font-medium flex-1 min-w-0">{group.indicator.description}</p>
                       </div>
+                      {/* (جديد) شارة الاستبانات المرتبطة بالبند — تظهر فقط عند وجود رابط صريح بالمعرّف،
+                          والنقر يفتح قائمة الاستبانات المرتبطة مصفّاة بهذا البند */}
+                      {(surveyLinkCounts?.[group.indicator.id] ?? 0) > 0 && (
+                        <Link
+                          href={`/surveys?indicatorId=${group.indicator.id}`}
+                          className="inline-flex items-center gap-1.5 mt-1.5 text-[11px] font-medium text-secondary bg-secondary/10 hover:bg-secondary/20 rounded-full px-2.5 py-1 transition-smooth w-fit"
+                        >
+                          <BarChart2 className="w-3 h-3 shrink-0" />
+                          مرتبطة بـ {(surveyLinkCounts?.[group.indicator.id] ?? 0)} استبانة مسجلة — عرض النتائج
+                        </Link>
+                      )}
                     </div>
-                    
+
                     {group.paragraphs.map((para: any) => {
                       const paraKey = `${group.indicator.id}-${para.no}`
                       const isCollapsed = collapsedParagraphs.has(paraKey)
@@ -282,7 +302,7 @@ export function AssessmentEngine({ assessment, domains, initialEvidenceResponses
                               <Badge variant="info" className="shrink-0 whitespace-nowrap">الفقرة {para.no}</Badge>
                               <p className="text-sm font-medium text-foreground-strong min-w-0 break-words">{para.title}</p>
                             </div>
-                            
+
                             <div className="flex items-center gap-3 shrink-0 mr-2">
                               {/* Counter: nowrap and shrink-0 prevents breaking */}
                               <div className="text-xs text-muted-foreground numeric whitespace-nowrap">
@@ -302,13 +322,13 @@ export function AssessmentEngine({ assessment, domains, initialEvidenceResponses
                                   <div key={ev.id} className={cn("p-4 transition-smooth", checked ? "bg-success/5" : "hover:bg-surface-muted/50")}>
                                     <div className="flex items-start justify-between gap-4 mb-3">
                                       <p className="text-sm text-foreground-strong flex-1">{ev.text}</p>
-                                      <button 
-                                        type="button" 
-                                        onClick={(e) => { e.stopPropagation(); handleEvidenceChange(ev.id, !checked) }} 
-                                        disabled={isReadOnly} 
+                                      <button
+                                        type="button"
+                                        onClick={(e) => { e.stopPropagation(); handleEvidenceChange(ev.id, !checked) }}
+                                        disabled={isReadOnly}
                                         className={cn(
-                                          "w-6 h-6 rounded flex items-center justify-center transition-smooth border-2 shrink-0", 
-                                          checked ? "bg-success border-success text-white" : "border-border bg-surface hover:border-primary", 
+                                          "w-6 h-6 rounded flex items-center justify-center transition-smooth border-2 shrink-0",
+                                          checked ? "bg-success border-success text-white" : "border-border bg-surface hover:border-primary",
                                           isReadOnly ? "opacity-50 cursor-not-allowed" : "cursor-pointer"
                                         )}
                                       >

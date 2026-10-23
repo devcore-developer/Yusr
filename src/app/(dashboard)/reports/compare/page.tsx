@@ -1,5 +1,6 @@
+// ===== FILE: src/app/(dashboard)/reports/compare/page.tsx =====
 import { prisma } from "@/lib/prisma"
-import { getCurrentUser } from "@/lib/permissions"
+import { getCurrentUser, getAuthorizedBranchIds } from "@/lib/permissions"
 import { redirect } from "next/navigation"
 import { PageHeader } from "@/components/layout/PageHeader"
 import { Card, CardContent } from "@/components/ui/Card"
@@ -15,7 +16,7 @@ export default async function EvaluatorComparisonPage({ searchParams }: { search
 
   let branchId = searchParams.branchId
   if (!branchId && user.branchId) branchId = user.branchId
-  
+
   if (!branchId) {
     return <div className="p-6">الرجاء تحديد فرع</div>
   }
@@ -23,38 +24,77 @@ export default async function EvaluatorComparisonPage({ searchParams }: { search
   const branch = await prisma.branch.findUnique({ where: { id: branchId }, include: { school: true } })
   if (!branch) return <div>الفرع غير موجود</div>
 
-  // التحقق من الصلاحيات
-  if (user.role === "BRANCH_MANAGER" && user.branchId !== branchId) redirect("/login")
-  if (user.role === "SCHOOL_MANAGER" && user.schoolId !== branch.schoolId) redirect("/login")
+  // ===== حماية الوصول على الخادم (فحص مستقل عن الواجهة وعن معاملات الرابط) =====
+  // هذه الصفحة تعرض أداء "كل" المقيّمين في الفرع — وليست من تقارير مقيّم الجودة نفسه،
+  // لذلك مقيّم الجودة وأي دور آخر ممنوع منها كليًا حتى لو مرّر branchId لفرع آخر يدويًا.
+  // ملاحظة: getBranchAnalytics تفرض نفس السياسة داخليًا أيضًا (دفاع في العمق).
+  let allowed = false
+  if (user.role === "SUPER_ADMIN") {
+    // مدير النظام: وصول على مستوى المنصة بلا قيود ملكية
+    allowed = true
+  } else if (user.role === "SCHOOL_MANAGER") {
+    // مدير المدرسة: فروع مدرسته فقط — أي branchId لمدرسة أخرى يُرفض
+    allowed = !!user.schoolId && user.schoolId === branch.schoolId
+  } else if (user.role === "BRANCH_MANAGER") {
+    // مدير الفرع: الفروع المصرّح بها فقط (يدعم تعدد الفروع المصرّح بها، مثل سياسة الخدمة نفسها)
+    const authorizedBranchIds = await getAuthorizedBranchIds(user)
+    allowed = authorizedBranchIds.includes(branchId)
+  }
+  if (!allowed) redirect("/login")
 
   const analytics = await getBranchAnalytics(branchId)
 
-  // جلب درجات المجالات لكل مقيّم
-  const domains = await prisma.domain.findMany({
-    include: {
-      indicators: {
-        include: {
-          fixedEvidence: true,
-          responses: {
-            where: { assessment: { branchId, type: "NORMAL", status: { in: ["IN_PROGRESS", "COMPLETED"] } } },
-            include: { assessment: { select: { assessorId: true } } }
-          }
-        }
+  // جلب درجات المجالات لكل مقيّم (استقلالية الحسابات — مطابقة لمنهجية تقرير الطباعة):
+  // - المصدر الصحيح للشواهد المتحققة هو evidenceResponses على التقييم نفسه
+  //   (EvidenceResponse بفلتر isVerified)، وسلسلة العلاقات evidence.indicator.domainId
+  //   هي التي تربط الشاهد بمؤشره ومجاله — وليس Indicator.responses (وهي ملاحظات
+  //   المؤشر لكل تقييم: assessmentId/indicatorId/notes فقط — بلا isVerified).
+  // - الاستجابات مقيدة بتقييمات هذا الفرع المؤهلة فقط (NORMAL + جاري/مكتمل)، وكل
+  //   استجابة تحمل تقييمها — لا يوجد أي استعلام يجلب استجابات من خارج هذا الفرع.
+  const branchAssessments = await prisma.assessment.findMany({
+    where: { branchId, type: "NORMAL", status: { in: ["IN_PROGRESS", "COMPLETED"] } },
+    select: {
+      assessorId: true,
+      evidenceResponses: {
+        where: { isVerified: true },
+        // evidenceId ضروري لتفريد الشواهد (زيارات الملاحظة الصفية المتعددة لنفس الشاهد)
+        select: { evidenceId: true, evidence: { select: { indicator: { select: { domainId: true } } } } }
       }
     }
+  })
+
+  const domains = await prisma.domain.findMany({
+    include: { indicators: { include: { fixedEvidence: true } } }
   })
 
   const evaluatorDomainScores: Record<string, { domain: string, score: number }[]> = {}
   for (const ev of analytics.evaluators) {
     evaluatorDomainScores[ev.id] = []
     for (const d of domains) {
-      let required = 0
-      let verified = 0
-      for (const ind of d.indicators) {
-        required += ind.fixedEvidence.length
-        verified += ind.responses.filter(r => r.assessment.assessorId === ev.id).length
+      const required = d.indicators.reduce((sum, ind) => sum + ind.fixedEvidence.length, 0)
+      // (إصلاح التضخم) درجة المجال تُحسب لكل تقييم مستقلًا من شواهده المفردة هو فقط،
+      // ثم درجة المقيّم = متوسط نسب تقييماته المستقلة — لا جمع لشواهد تقييمات
+      // متعددة فوق مقام إطار واحد (كان يعطي حتى 300% مع ثلاثة تقييمات مكتملة)،
+      // وصفوف زيارات الملاحظة الصفية لنفس الشاهد لا تُعدّ أكثر من مرة.
+      const assessmentPcts: number[] = []
+      for (const a of branchAssessments) {
+        if (a.assessorId !== ev.id) continue
+        const seen = new Set<string>()
+        let verified = 0
+        for (const r of a.evidenceResponses) {
+          // evidenceId عمود قائم في EvidenceResponse — هوية التفريد الوحيدة هنا
+          const key = r.evidenceId
+          if (key) {
+            if (seen.has(key)) continue
+            seen.add(key)
+          }
+          if (r.evidence.indicator.domainId === d.id) verified++
+        }
+        if (required > 0) assessmentPcts.push(Math.round((verified / required) * 100))
       }
-      const score = required > 0 ? Math.round((verified / required) * 100) : 0
+      const score = assessmentPcts.length > 0
+        ? Math.round(assessmentPcts.reduce((s, p) => s + p, 0) / assessmentPcts.length)
+        : 0
       evaluatorDomainScores[ev.id].push({ domain: d.name, score })
     }
   }
@@ -111,8 +151,8 @@ export default async function EvaluatorComparisonPage({ searchParams }: { search
                   <span className="text-muted-foreground">{ev.provisionalAverage ?? 0}%</span>
                 </div>
                 <div className="w-full bg-surface-muted rounded-full h-4 overflow-hidden">
-                  <div 
-                    className="bg-primary h-4 rounded-full transition-all" 
+                  <div
+                    className="bg-primary h-4 rounded-full transition-all"
                     style={{ width: `${ev.provisionalAverage ?? 0}%` }}
                   ></div>
                 </div>

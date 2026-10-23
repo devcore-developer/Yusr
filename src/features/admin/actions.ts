@@ -1,10 +1,40 @@
+// ===== FILE: src/features/admin/actions.ts =====
 "use server"
 
 import { prisma } from "@/lib/prisma"
-import { getCurrentUser, getAuthorizedBranchIds } from "@/lib/permissions"
+import { getCurrentUser, getAuthorizedBranchIds, getUserStageGrant } from "@/lib/permissions"
+import { normalizeStageIds, getStageLabel, type EducationalStageId } from "@/lib/stages"
 import bcrypt from "bcryptjs"
 import { revalidatePath } from "next/cache"
 import { UserRole } from "@prisma/client"
+
+// الأدوار التي تدعم تعيين مراحل تعليمية متعدد (§2 من متطلبات الميزة)
+const STAGE_ASSIGNABLE_ROLES = ["BRANCH_MANAGER", "QUALITY_ASSESSOR"]
+
+/**
+ * قراءة وتطبيع مراحل نموذج الحساب على الخادم + قيد المصدر:
+ * مدير القسم لا يستطيع منح مراحل خارج المراحل المعينة عليه (لا صلاحيات إضافية لأي دور).
+ * يُرجع قائمة نظيفة أو خطأ جاهز للعرض داخل نتيجة الـ Action.
+ */
+function resolveSubmittedStages(
+  formData: FormData,
+  grant: ReturnType<typeof getUserStageGrant>
+): { stages: EducationalStageId[] } | { error: string } {
+  let stages: EducationalStageId[]
+  try {
+    stages = normalizeStageIds(formData.getAll("stages"))
+  } catch (e) {
+    return { error: e instanceof Error ? e.message : "المراحل التعليمية المحددة غير صحيحة." }
+  }
+  if (grant.mode === "LIMITED") {
+    const allowed = new Set(grant.stages)
+    const illegal = stages.filter(s => !allowed.has(s))
+    if (illegal.length > 0) {
+      return { error: `لا يمكنك منح مراحل غير معينة عليك: ${illegal.map(s => getStageLabel(s)).join("، ")}` }
+    }
+  }
+  return { stages }
+}
 
 async function verifyConfirmation(password: string, confirmPhrase: string, actionType: "DELETE_SCHOOL" | "DELETE_USER") {
   const user = await getCurrentUser()
@@ -207,13 +237,23 @@ export async function createUser(formData: FormData) {
     return { error: "غير مصرح لك بإنشاء مستخدمين" }
   }
 
+  // ===== المراحل التعليمية (§2): تعيين متعدد لمديري الأقسام والمقيّمين فقط =====
+  // يُطبَّع على الخادم (لا ثقة بالعميل) + قيد المصدر: مدير القسم لا يمنح إلا مما عُيّن عليه.
+  // حسابات الأدوار الأخرى تُنشأ بلا قائمة مراحل (مدير النظام/العام غير مقيّدين أصلًا).
+  let assignedStages: EducationalStageId[] = []
+  if (STAGE_ASSIGNABLE_ROLES.includes(finalRole)) {
+    const result = resolveSubmittedStages(formData, getUserStageGrant(currentUser))
+    if ("error" in result) return { error: result.error }
+    assignedStages = result.stages
+  }
+
   try {
     const hashedPassword = await bcrypt.hash(password, 10)
     const newUser = await prisma.user.create({
-      data: { name, email, password: hashedPassword, role: finalRole, schoolId: finalSchoolId, branchId: finalBranchId, status: "ACTIVE" }
+      data: { name, email, password: hashedPassword, role: finalRole, schoolId: finalSchoolId, branchId: finalBranchId, status: "ACTIVE", stages: assignedStages }
     })
     await prisma.activity.create({
-      data: { actorId: currentUser.id, schoolId: finalSchoolId, branchId: finalBranchId, action: "CREATE", entityType: "USER", entityId: newUser.id, metadata: { name, email, role: finalRole } }
+      data: { actorId: currentUser.id, schoolId: finalSchoolId, branchId: finalBranchId, action: "CREATE", entityType: "USER", entityId: newUser.id, metadata: { name, email, role: finalRole, stages: assignedStages } }
     })
     revalidatePath("/school-manager/users")
     revalidatePath("/users")
@@ -342,15 +382,28 @@ export async function adminUpdateUser(userId: string, formData: FormData) {
   const emailExists = await prisma.user.findFirst({ where: { email, NOT: { id: userId } } })
   if (emailExists) return { error: "البريد الإلكتروني مستخدم بالفعل" }
 
-  const data: { name: string; email: string; role?: UserRole } = { name, email }
+  const data: { name: string; email: string; role?: UserRole; stages?: EducationalStageId[] } = { name, email }
   // يُحدَّث الدور فقط إذا أُرسل فعلاً وكان لمرسله حق تغييره
   if (submittedRole && currentUser.role !== "BRANCH_MANAGER") {
     data.role = submittedRole as UserRole
   }
 
+  // ===== المراحل التعليمية (§2): تُحدَّث فقط إذا أرسل النموذج حقل stages أصلاً =====
+  // النماذج التي بلا قائمة مراحل لا تغيّر التعيينات الحالية — توافق خلفي آمن.
+  // قائمة ظاهرة بلا أي تحديد (كل المربعات فارغة) = مسح كل المراحل (سلوك مقصود).
+  if (formData.has("stages")) {
+    const effectiveRole = (data.role ?? targetUser.role) as string
+    if (STAGE_ASSIGNABLE_ROLES.includes(effectiveRole)) {
+      const result = resolveSubmittedStages(formData, getUserStageGrant(currentUser))
+      if ("error" in result) return { error: result.error }
+      data.stages = result.stages
+    }
+    // الدور النهائي لا يدعم تعيين المراحل (مدير نظام/مدير عام) → تُتجاهل القيمة المرسلة
+  }
+
   try {
     await prisma.user.update({ where: { id: userId }, data })
-    await prisma.activity.create({ data: { actorId: currentUser.id, schoolId: targetUser.schoolId, action: "UPDATE", entityType: "USER", entityId: userId, metadata: { name, email, role: data.role ?? targetUser.role } } })
+    await prisma.activity.create({ data: { actorId: currentUser.id, schoolId: targetUser.schoolId, action: "UPDATE", entityType: "USER", entityId: userId, metadata: { name, email, role: data.role ?? targetUser.role, ...(data.stages ? { stages: data.stages } : {}) } } })
     revalidatePath("/users")
     revalidatePath("/school-manager/users")
     return { success: true }

@@ -1,3 +1,4 @@
+// ===== FILE: src/app/(school-manager)/school-manager/users/add/page.tsx =====
 "use client"
 
 import { useState } from "react"
@@ -6,8 +7,13 @@ import { Button } from "@/components/ui/Button"
 import { Input } from "@/components/ui/Input"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/Select"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/Card"
+import { StageChecklist } from "@/components/ui/StageChecklist"
 import { createUser } from "@/features/admin/actions"
 import { Loader2, Save } from "lucide-react"
+import { PageHeader } from "@/components/layout/PageHeader"
+
+// الأدوار التي يظهر لها حقل تعيين المراحل التعليمية (مطابق لفرض الخادم في createUser)
+const STAGE_ASSIGNABLE_ROLES = ["BRANCH_MANAGER", "QUALITY_ASSESSOR"]
 
 export default function AddUserPage({ searchParams }: { searchParams: { role?: string } }) {
   const router = useRouter()
@@ -20,6 +26,10 @@ export default function AddUserPage({ searchParams }: { searchParams: { role?: s
   const allowedRoles = userRole === "SCHOOL_MANAGER" 
     ? [{ value: "BRANCH_MANAGER", label: "مدير قسم" }, { value: "QUALITY_ASSESSOR", label: "مشرف" }]
     : [{ value: "QUALITY_ASSESSOR", label: "مشرف" }]
+
+  // الدور المختار — يتحكم في ظهور/إخفاء قائمة المراحل التعليمية
+  const [selectedRole, setSelectedRole] = useState(allowedRoles[0].value)
+  const showStageChecklist = STAGE_ASSIGNABLE_ROLES.includes(selectedRole)
 
   const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault()
@@ -69,7 +79,11 @@ export default function AddUserPage({ searchParams }: { searchParams: { role?: s
             {allowedRoles.length > 1 ? (
               <div className="space-y-1.5">
                 <label className="text-sm font-medium">الدور</label>
-                <Select name="role" defaultValue={allowedRoles[0].value}>
+                <Select
+                  name="role"
+                  value={selectedRole}
+                  onValueChange={v => setSelectedRole(v)}
+                >
                   <SelectTrigger className="w-full">
                     <SelectValue placeholder="اختر الدور" />
                   </SelectTrigger>
@@ -81,6 +95,10 @@ export default function AddUserPage({ searchParams }: { searchParams: { role?: s
             ) : (
               <input type="hidden" name="role" value={allowedRoles[0].value} />
             )}
+
+            {/* قائمة المراحل التعليمية (اختيار متعدد) — لمديري الأقسام والمقيّمين فقط.
+                التحقق النهائي دائمًا على الخادم في createUser */}
+            {showStageChecklist && <StageChecklist />}
 
             {/* حقل اختيار الفرع يظهر فقط لالمدير العام، أما مدير قسم فيتم ربطه تلقائياً في الخادم */}
             {userRole === "SCHOOL_MANAGER" && (
@@ -109,6 +127,3 @@ export default function AddUserPage({ searchParams }: { searchParams: { role?: s
     </div>
   )
 }
-
-// استيراد PageHeader داخل الملف
-import { PageHeader } from "@/components/layout/PageHeader"

@@ -1,3 +1,4 @@
+// ===== FILE: src/app/(school-manager)/school-manager/quality/improvement-plans/page.tsx =====
 import { prisma } from "@/lib/prisma"
 import { getCurrentUser } from "@/lib/permissions"
 import { PageHeader } from "@/components/layout/PageHeader"
@@ -9,16 +10,25 @@ import { EmptyState } from "@/components/ui/EmptyState"
 import { Plus, FileText, AlertCircle, Eye, Printer } from "lucide-react"
 import Link from "next/link"
 import { formatDate } from "@/lib/utils"
+import { getIndicatorLabels } from "@/features/improvement-plans/queries"
 
 export default async function ImprovementPlansPage() {
   const user = await getCurrentUser()
   if (!user?.schoolId) return null
+
+  // (تعديل هذه المهمة) زر «خطة جديدة» لمقيّم الجودة فقط — الإنشاء صلاحيته حصرية على الخادم
+  // (savePlan) فإخفاؤه هنا يمنع وصول غير المقيّمين لخطأ غير مصرح عند محاولة الإنشاء،
+  // والعرض يبقى متاحًا للجميع عبر قاعدة الوصول الموحدة.
+  const canCreatePlans = user.role === "QUALITY_ASSESSOR"
 
   const plans = await prisma.improvementPlan.findMany({
     where: { schoolId: user.schoolId },
     include: { branch: true, gap: { include: { indicator: true } } },
     orderBy: { createdAt: "desc" },
   })
+
+  // Task 16 (إضافة فقط): أكواد المؤشرات للخطط المرتبطة بمؤشر بلا فجوة — لا يغيّر استعلام الخطط القائم
+  const indicatorLabels = await getIndicatorLabels(plans.map(p => p.indicatorId).filter((v): v is string => Boolean(v)))
 
   const activeCount = plans.filter(p => p.status === "ACTIVE" || p.status === "IN_PROGRESS").length
   const completedCount = plans.filter(p => p.status === "COMPLETED").length
@@ -34,9 +44,11 @@ export default async function ImprovementPlansPage() {
           { label: "خطط التحسين" }
         ]}
         actions={
-          <Link href="/school-manager/quality/improvement-plans/new">
-            <Button variant="primary" size="md" icon={<Plus className="w-4 h-4" />}>خطة جديدة</Button>
-          </Link>
+          canCreatePlans ? (
+            <Link href="/school-manager/quality/improvement-plans/new">
+              <Button variant="primary" size="md" icon={<Plus className="w-4 h-4" />}>خطة جديدة</Button>
+            </Link>
+          ) : undefined
         }
       />
 
@@ -80,7 +92,7 @@ export default async function ImprovementPlansPage() {
               description="لم يتم إنشاء أي خطة بعد." 
               compact 
               className="py-12"
-              action={{ label: "إنشاء خطة جديدة", href: "/school-manager/quality/improvement-plans/new" }}
+              action={canCreatePlans ? { label: "إنشاء خطة جديدة", href: "/school-manager/quality/improvement-plans/new" } : undefined}
             />
           ) : (
             <div className="overflow-x-auto scrollbar-thin">
@@ -99,12 +111,20 @@ export default async function ImprovementPlansPage() {
                 <tbody className="divide-y divide-border">
                   {plans.map(plan => {
                     const isOverdue = new Date() > plan.targetDate && plan.status !== "COMPLETED"
+                    // Task 16 (إضافة فقط): المؤشر المرتبط للخطط بلا فجوة — صفوف الفجوات القائمة كما هي حرفيًا
+                    const linkedIndicator = !plan.gap?.indicator && plan.indicatorId ? indicatorLabels.get(plan.indicatorId) : undefined
                     return (
                       <tr key={plan.id} className="hover:bg-surface-muted/50 transition-smooth">
                         <td className="px-6 py-4">
-                          <p className="font-medium text-foreground-strong">{plan.title}</p>
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <p className="font-medium text-foreground-strong">{plan.title}</p>
+                            {plan.kind === "SUSTAINABILITY" && <Badge variant="info">خطة استدامة</Badge>}
+                          </div>
                           {plan.gap?.indicator && (
                             <p className="text-[12px] text-muted-foreground mt-1">مرتبط بفجوة: <span className="font-mono text-secondary">{plan.gap.indicator.code}</span></p>
+                          )}
+                          {linkedIndicator && (
+                            <p className="text-[12px] text-muted-foreground mt-1">مرتبط بمؤشر: <span className="font-mono text-secondary">{linkedIndicator.code}</span></p>
                           )}
                         </td>
                         <td className="px-6 py-4 hidden md:table-cell text-muted-foreground text-[13px]">{plan.branch?.name ?? "كامل المدرسة"}</td>
@@ -130,7 +150,7 @@ export default async function ImprovementPlansPage() {
                             <Link href={`/school-manager/quality/improvement-plans/${plan.id}`}>
                               <Button variant="ghost" size="icon-sm" aria-label="عرض" icon={<Eye className="w-4 h-4" />} />
                             </Link>
-                            <Link href={`/school-manager/quality/improvement-plans/${plan.id}/print`} target="_blank">
+                            <Link href={`/improvement-plans/${plan.id}/print`} target="_blank">
                               <Button variant="ghost" size="icon-sm" aria-label="طباعة" icon={<Printer className="w-4 h-4" />} />
                             </Link>
                           </div>

@@ -1,12 +1,15 @@
+// ===== FILE: src/app/(dashboard)/improvement-plans/[planId]/page.tsx =====
 import { prisma } from "@/lib/prisma"
-import { getCurrentUser } from "@/lib/permissions"
+import { getCurrentUser, getAuthorizedBranchIds } from "@/lib/permissions"
 import { redirect } from "next/navigation"
 import { PageHeader } from "@/components/layout/PageHeader"
 import { Card, CardContent } from "@/components/ui/Card"
 import { Badge } from "@/components/ui/Badge"
 import { Button } from "@/components/ui/Button"
 import Link from "next/link"
-import { ArrowRight, CheckCircle } from "lucide-react"
+import { ArrowRight, CheckCircle, Printer } from "lucide-react"
+import { getIndicatorLabels } from "@/features/improvement-plans/queries"
+import { canViewPlan } from "@/features/improvement-plans/access"
 
 export default async function ViewImprovementPlanPage({ params }: { params: { planId: string } }) {
   const user = await getCurrentUser()
@@ -36,19 +39,36 @@ export default async function ViewImprovementPlanPage({ params }: { params: { pl
     )
   }
 
-  const isSuperAdmin = user.role === "SUPER_ADMIN"
-  const isOwner = user.role === "QUALITY_ASSESSOR" && plan.createdById === user.id
-
-  if (!isSuperAdmin && !isOwner) {
+  // (تعديل هذه المهمة) نفس قاعدة الوصول الموحدة للقائمة والطباعة:
+  //   مقيّم الجودة: خططه فقط / مدير المدرسة: مدرسته / مدير القسم: فروعه المصرح بها
+  //   + خطط المدرسة كله / مدير النظام: الكل — الفحص على الخادم من بيانات الخطة المخزنة.
+  const authorizedBranchIds = user.role === "BRANCH_MANAGER" ? await getAuthorizedBranchIds(user) : []
+  const allowed = canViewPlan(
+    user,
+    { schoolId: plan.schoolId, branchId: plan.branchId, createdById: plan.createdById },
+    authorizedBranchIds
+  )
+  if (!allowed) {
     redirect("/improvement-plans")
   }
 
-  const isReadOnly = isSuperAdmin
+  const isSuperAdmin = user.role === "SUPER_ADMIN"
+  const isOwner = user.role === "QUALITY_ASSESSOR" && plan.createdById === user.id
+  // نفس منطق القراءة فقط القائم: الإدارة تقرأ فقط، ومقيّم الجودة (مالك الخطة) يعمل على خطته.
+  // مدير المدرسة/القسم يعرضان فقط — لا تُمنح صلاحية تعديل بمجرد فتح العرض.
+  const isReadOnly = isSuperAdmin || (!isOwner && user.role !== "QUALITY_ASSESSOR")
+
+  // Task 16 (إضافة فقط): المؤشر المرتبط للخطط بلا فجوة — بالعمود القائم indicatorId
+  const linkedIndicator = !plan.gap?.indicator && plan.indicatorId
+    ? (await getIndicatorLabels([plan.indicatorId])).get(plan.indicatorId)
+    : undefined
+  // Task 16 (إضافة فقط): تسمية نوع الخطة — خطط التحسين القائمة بنفس العنوان السابق حرفيًا
+  const planKindLabel = plan.kind === "SUSTAINABILITY" ? "خطة استدامة" : "خطة تحسين"
 
   return (
     <div className="space-y-6">
       <PageHeader
-        title={`خطة تحسين: ${plan.title}`}
+        title={`${planKindLabel}: ${plan.title}`}
         description="عرض تفاصيل خطة التحسين والمتابعة."
         breadcrumbs={[
           { label: 'الرئيسية', href: '/' },
@@ -56,9 +76,15 @@ export default async function ViewImprovementPlanPage({ params }: { params: { pl
           { label: 'عرض الخطة' }
         ]}
         actions={
-          <Link href="/improvement-plans">
-            <Button variant="outline" icon={<ArrowRight className="w-4 h-4" />}>العودة للقائمة</Button>
-          </Link>
+          <div className="flex gap-2">
+            {/* (جديد) طباعة الخطة — متاحة لكل من يُسمح له بالعرض، وصفحة الطباعة تفرض النطاق على الخادم */}
+            <Link href={`/improvement-plans/${plan.id}/print`} target="_blank">
+              <Button variant="outline" icon={<Printer className="w-4 h-4" />}>طباعة خطة التحسين</Button>
+            </Link>
+            <Link href="/improvement-plans">
+              <Button variant="outline" icon={<ArrowRight className="w-4 h-4" />}>العودة للقائمة</Button>
+            </Link>
+          </div>
         }
       />
 
@@ -71,6 +97,7 @@ export default async function ViewImprovementPlanPage({ params }: { params: { pl
                   {plan.status === "COMPLETED" ? "مكتملة" : plan.status === "IN_PROGRESS" ? "قيد التنفيذ" : "مسودة"}
                 </Badge>
                 {plan.assessment?.cycle && <Badge variant="info">دورة {plan.assessment.cycle}</Badge>}
+                {plan.kind === "SUSTAINABILITY" && <Badge variant="info">خطة استدامة</Badge>}
               </div>
               <p className="text-sm text-muted-foreground">{plan.description || "لا يوجد وصف"}</p>
             </div>
@@ -84,7 +111,11 @@ export default async function ViewImprovementPlanPage({ params }: { params: { pl
             <div className="space-y-1">
               <p className="text-xs text-muted-foreground">المؤشر المرتبط</p>
               <p className="text-sm font-medium">
-                {plan.gap?.indicator ? `${plan.gap.indicator.code} - ${plan.gap.indicator.description}` : "غير محدد"}
+                {plan.gap?.indicator
+                  ? `${plan.gap.indicator.code} - ${plan.gap.indicator.description}`
+                  : linkedIndicator
+                    ? `${linkedIndicator.code} - ${linkedIndicator.description}`
+                    : "غير محدد"}
               </p>
             </div>
             <div className="space-y-1">
@@ -107,6 +138,13 @@ export default async function ViewImprovementPlanPage({ params }: { params: { pl
               <p className="text-xs text-muted-foreground">تاريخ الإنجاز المستهدف</p>
               <p className="text-sm font-medium">{new Date(plan.targetDate).toLocaleDateString('ar-SA')}</p>
             </div>
+            {/* Task 16 (إضافة فقط): الدرجة المرجعية لحظة الإنشاء — تظهر فقط عند توفرها */}
+            {plan.evidenceScore !== null && plan.evidenceScore !== undefined && (
+              <div className="space-y-1">
+                <p className="text-xs text-muted-foreground">الدرجة المرجعية عند الإنشاء</p>
+                <p className="text-sm font-medium numeric">{plan.evidenceScore}%</p>
+              </div>
+            )}
           </div>
 
           {(plan.reasons || plan.strengths || plan.improvements) && (
@@ -163,7 +201,11 @@ export default async function ViewImprovementPlanPage({ params }: { params: { pl
       {isReadOnly && (
         <div className="bg-blue-50 border border-blue-200 text-blue-800 p-4 rounded-lg flex items-center gap-2 text-sm">
           <CheckCircle className="w-5 h-5" />
-          <span>أنت تعرض هذه الخطة في وضع القراءة فقط (Read-Only) بصفتك مدير النظام.</span>
+          <span>
+            {isSuperAdmin
+              ? "أنت تعرض هذه الخطة في وضع القراءة فقط (Read-Only) بصفتك مدير النظام."
+              : "أنت تعرض هذه الخطة في وضع القراءة فقط — إنشاء وتحرير خطط التحسين من صلاحيات مقيّم الجودة."}
+          </span>
         </div>
       )}
     </div>

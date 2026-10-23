@@ -1,0 +1,3567 @@
+﻿===== FILE: src\app\(dashboard)\reports\page.tsx =====
+import { prisma } from "@/lib/prisma"
+import { getCurrentUser } from "@/lib/permissions"
+import { redirect } from "next/navigation"
+import { PageHeader } from "@/components/layout/PageHeader"
+import { Card, CardContent } from "@/components/ui/Card"
+import { Badge } from "@/components/ui/Badge"
+import { Button } from "@/components/ui/Button"
+import { Progress } from "@/components/ui/Progress"
+import Link from "next/link"
+import Image from "next/image"
+import { getPerformanceBand } from "@/features/quality-assessment/services/analysis"
+
+// Shared calculation function for branch performance
+async function calculateBranchPerformance(branchId: string) {
+  const totalEvidence = await prisma.fixedEvidence.count()
+  
+  const assessments = await prisma.assessment.findMany({
+    where: {
+      branchId,
+      type: { not: "PRIVATE_REVIEW" },
+      status: "COMPLETED"
+    },
+    include: {
+      assessor: { select: { id: true, name: true, role: true } },
+      evidenceResponses: { where: { isVerified: true } }
+    }
+  })
+
+  if (assessments.length === 0) {
+    return {
+      percentage: null as number | null,
+      band: 'غير مقيم',
+      assessmentCount: 0,
+      evaluators: [] as any[],
+      assessments: [] as any[]
+    }
+  }
+
+  const assessmentScores = assessments.map(a => {
+    const verified = a.evidenceResponses.length
+    return {
+      id: a.id,
+      assessorId: a.assessor?.id ?? "unknown",
+      assessorName: a.assessor?.name ?? "غير محدد",
+      assessorRole: a.assessor?.role ?? "غير محدد",
+      score: totalEvidence > 0 ? Math.round((verified / totalEvidence) * 100) : 0,
+      verifiedCount: verified,
+      totalEvidence
+    }
+  })
+
+  const avgScore = Math.round(
+    assessmentScores.reduce((sum, s) => sum + s.score, 0) / assessmentScores.length
+  )
+
+  // Unique evaluators
+  const evaluatorMap = new Map()
+  for (const s of assessmentScores) {
+    if (!evaluatorMap.has(s.assessorId)) {
+      evaluatorMap.set(s.assessorId, {
+        id: s.assessorId,
+        name: s.assessorName,
+        role: s.assessorRole,
+        assessmentCount: 0,
+        scores: [] as number[]
+      })
+    }
+    const ev = evaluatorMap.get(s.assessorId)
+    ev.assessmentCount++
+    ev.scores.push(s.score)
+  }
+
+  const evaluators = Array.from(evaluatorMap.values()).map(ev => ({
+    ...ev,
+    averageScore: Math.round(ev.scores.reduce((a: number, b: number) => a + b, 0) / ev.scores.length)
+  }))
+
+  return {
+    percentage: avgScore,
+    band: getPerformanceBand(avgScore),
+    assessmentCount: assessments.length,
+    evaluators,
+    assessments: assessmentScores
+  }
+}
+
+// Shared calculation for school performance
+async function calculateSchoolPerformance(schoolId: string) {
+  const totalEvidence = await prisma.fixedEvidence.count()
+  
+  const assessments = await prisma.assessment.findMany({
+    where: {
+      schoolId,
+      type: { not: "PRIVATE_REVIEW" },
+      status: "COMPLETED"
+    },
+    include: {
+      assessor: { select: { id: true, name: true, role: true } },
+      evidenceResponses: { where: { isVerified: true } }
+    }
+  })
+
+  if (assessments.length === 0) {
+    return {
+      percentage: null as number | null,
+      band: 'غير مقيم',
+      assessmentCount: 0,
+      evaluators: [] as any[],
+      assessments: [] as any[]
+    }
+  }
+
+  const assessmentScores = assessments.map(a => {
+    const verified = a.evidenceResponses.length
+    return {
+      id: a.id,
+      assessorId: a.assessor?.id ?? "unknown",
+      assessorName: a.assessor?.name ?? "غير محدد",
+      assessorRole: a.assessor?.role ?? "غير محدد",
+      score: totalEvidence > 0 ? Math.round((verified / totalEvidence) * 100) : 0,
+      verifiedCount: verified,
+      totalEvidence
+    }
+  })
+
+  const avgScore = Math.round(
+    assessmentScores.reduce((sum, s) => sum + s.score, 0) / assessmentScores.length
+  )
+
+  const evaluatorMap = new Map()
+  for (const s of assessmentScores) {
+    if (!evaluatorMap.has(s.assessorId)) {
+      evaluatorMap.set(s.assessorId, {
+        id: s.assessorId,
+        name: s.assessorName,
+        role: s.assessorRole,
+        assessmentCount: 0,
+        scores: [] as number[]
+      })
+    }
+    const ev = evaluatorMap.get(s.assessorId)
+    ev.assessmentCount++
+    ev.scores.push(s.score)
+  }
+
+  const evaluators = Array.from(evaluatorMap.values()).map(ev => ({
+    ...ev,
+    averageScore: Math.round(ev.scores.reduce((a: number, b: number) => a + b, 0) / ev.scores.length)
+  }))
+
+  return {
+    percentage: avgScore,
+    band: getPerformanceBand(avgScore),
+    assessmentCount: assessments.length,
+    evaluators,
+    assessments: assessmentScores
+  }
+}
+
+export default async function ReportsPage({
+  searchParams
+}: {
+  searchParams: { [key: string]: string | string[] | undefined }
+}) {
+  const user = await getCurrentUser()
+  if (!user) redirect("/login")
+
+  const isSuperAdmin = user.role === "SUPER_ADMIN"
+  const isSchoolManager = user.role === "SCHOOL_MANAGER"
+  const isBranchManager = user.role === "BRANCH_MANAGER"
+  const isQualityAssessor = user.role === "QUALITY_ASSESSOR"
+
+  // === 1. Super Admin: School comparison ===
+  if (isSuperAdmin) {
+    const schools = await prisma.school.findMany({
+      include: { 
+        _count: { select: { branches: true } },
+        assessments: { 
+          where: { type: { not: "PRIVATE_REVIEW" }, status: "COMPLETED" },
+          include: { assessor: true }
+        }
+      }
+    })
+
+    const schoolStats = await Promise.all(schools.map(async s => {
+      const perf = await calculateSchoolPerformance(s.id)
+      return { 
+        ...s, 
+        completed: perf.assessmentCount,
+        total: s.assessments.length,
+        pct: perf.percentage ?? 0,
+        band: perf.band,
+        percentage: perf.percentage
+      }
+    }))
+
+    return (
+      <div className="space-y-6">
+        <PageHeader
+          title="تقارير المنصة الشاملة"
+          description="مقارنة أداء المدارس المسجلة ونسب إكمال التقييمات."
+          breadcrumbs={[{ label: 'الرئيسية', href: '/' }, { label: 'التقارير' }]}
+        />
+
+        {/* Desktop Table Layout */}
+        <Card className="overflow-hidden hidden md:block">
+          <CardContent className="p-0">
+            <table className="w-full text-sm text-right min-w-[800px]">
+              <thead className="text-[12px] text-muted-foreground bg-surface-muted uppercase">
+                <tr>
+                  <th className="px-6 py-4 font-medium">المدرسة</th>
+                  <th className="px-6 py-4 font-medium">الفروع</th>
+                  <th className="px-6 py-4 font-medium">التقييمات المكتملة</th>
+                  <th className="px-6 py-4 font-medium">الأداء العام</th>
+                  <th className="px-6 py-4 font-medium">المستوى</th>
+                  <th className="px-6 py-4 font-medium text-left">إجراءات</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-border">
+                {schoolStats.map((s) => (
+                  <tr key={s.id} className="hover:bg-surface-muted/50">
+                    <td className="px-6 py-4">
+                      <div className="flex items-center gap-3">
+                        {s.logoUrl ? (
+                          <Image src={s.logoUrl} alt={s.name} width={32} height={32} className="rounded-full shrink-0" />
+                        ) : (
+                          <div className="w-8 h-8 rounded-full bg-primary/10 flex items-center justify-center text-primary font-bold text-xs shrink-0">{s.name.charAt(0)}</div>
+                        )}
+                        <span className="font-medium text-foreground-strong">{s.name}</span>
+                      </div>
+                    </td>
+                    <td className="px-6 py-4 text-muted-foreground numeric">{s._count.branches}</td>
+                    <td className="px-6 py-4 text-muted-foreground numeric">{s.completed}</td>
+                    <td className="px-6 py-4 min-w-[150px]">
+                      {s.percentage !== null ? (
+                        <div className="flex items-center gap-2">
+                          <Progress value={s.percentage} size="sm" className="w-20" tone={s.percentage === 100 ? "success" : "default"} />
+                          <span className="text-[12px] font-medium text-muted-foreground numeric">{s.percentage}%</span>
+                        </div>
+                      ) : (
+                        <span className="text-[12px] text-muted-foreground">غير مقيم</span>
+                      )}
+                    </td>
+                    <td className="px-6 py-4">
+                      <Badge variant={s.percentage === null ? "neutral" : s.percentage >= 90 ? "success" : s.percentage >= 75 ? "info" : s.percentage >= 50 ? "warning" : "danger"}>
+                        {s.band}
+                      </Badge>
+                    </td>
+                    <td className="px-6 py-4 text-left">
+                      <Link href={`/reports/print?scope=single&schoolId=${s.id}`}>
+                        <Button variant="ghost" size="sm">تقرير المدرسة</Button>
+                      </Link>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </CardContent>
+        </Card>
+
+        {/* Mobile Card Layout */}
+        <div className="grid grid-cols-1 gap-4 md:hidden min-w-0">
+          {schoolStats.map((s) => (
+            <Card key={s.id} className="p-4 min-w-0">
+              <div className="flex items-center gap-3 mb-3">
+                {s.logoUrl ? (
+                  <Image src={s.logoUrl} alt={s.name} width={40} height={40} className="rounded-full shrink-0" />
+                ) : (
+                  <div className="w-10 h-10 rounded-full bg-primary/10 flex items-center justify-center text-primary font-bold text-sm shrink-0">{s.name.charAt(0)}</div>
+                )}
+                <div className="min-w-0">
+                  <h3 className="font-bold text-foreground-strong truncate">{s.name}</h3>
+                  <p className="text-xs text-muted-foreground">{s._count.branches} فروع • {s.completed} تقييم مكتمل</p>
+                </div>
+              </div>
+              <div className="border-t pt-3">
+                <div className="flex justify-between items-center mb-2">
+                  <span className="text-xs text-muted-foreground">الأداء العام</span>
+                  <Badge variant={s.percentage === null ? "neutral" : s.percentage >= 90 ? "success" : s.percentage >= 75 ? "info" : s.percentage >= 50 ? "warning" : "danger"}>
+                    {s.band}
+                  </Badge>
+                </div>
+                {s.percentage !== null ? (
+                  <div className="flex items-center gap-2 mb-3">
+                    <Progress value={s.percentage} size="sm" className="w-full" tone={s.percentage === 100 ? "success" : "default"} />
+                    <span className="text-[12px] font-medium text-muted-foreground numeric">{s.percentage}%</span>
+                  </div>
+                ) : (
+                  <p className="text-[12px] text-muted-foreground mb-3">غير مقيم</p>
+                )}
+                <Link href={`/reports/print?scope=single&schoolId=${s.id}`} className="block">
+                  <Button variant="outline" size="sm" className="w-full">عرض التقرير</Button>
+                </Link>
+              </div>
+            </Card>
+          ))}
+        </div>
+
+        <Card className="p-6">
+          <h3 className="font-bold mb-4">تصدير تقرير شامل (جميع المدارس)</h3>
+          <form action="/reports/print" method="GET">
+            <input type="hidden" name="scope" value="all" />
+            <Button type="submit" variant="outline">تجهيز التقرير الشامل (PDF)</Button>
+          </form>
+        </Card>
+      </div>
+    )
+  }
+
+  // === 2. Branch Manager: Multi-evaluator branch report ===
+  if (isBranchManager && user.branchId) {
+    const branch = await prisma.branch.findUnique({
+      where: { id: user.branchId },
+      include: { school: { select: { name: true, logoUrl: true, id: true } } }
+    })
+
+    if (!branch) return null
+
+    const perf = await calculateBranchPerformance(branch.id)
+
+    return (
+      <div className="space-y-6">
+        <PageHeader
+          title={`تقارير فرع ${branch.name}`}
+          description="نتائج تقييم الجودة لفرعك مع دعم متعدد المقيّمين."
+          breadcrumbs={[{ label: 'الرئيسية', href: '/' }, { label: 'التقارير' }]}
+        />
+
+        {/* Overall Branch Performance */}
+        <Card className="p-8 text-center bg-primary text-white shadow-premium">
+          <h2 className="text-lg font-bold mb-4 text-white">النسبة الإجمالية لأداء الفرع</h2>
+          {perf.percentage !== null ? (
+            <>
+              <div className="text-6xl font-bold mb-2 text-white numeric">{perf.percentage}%</div>
+              <Badge variant={perf.percentage >= 90 ? "success" : perf.percentage >= 75 ? "info" : perf.percentage >= 50 ? "warning" : "danger"} className="text-base">{perf.band}</Badge>
+              <p className="text-sm text-primary-100/80 mt-4">
+                بناءً على {perf.assessmentCount} تقييم مكتمل • {perf.evaluators.length} مقيّم
+              </p>
+            </>
+          ) : (
+            <>
+              <div className="text-6xl font-bold mb-2 text-white/60">—</div>
+              <Badge variant="neutral" className="text-base">غير مقيم</Badge>
+              <p className="text-sm text-primary-100/80 mt-4">لا توجد تقييمات مكتملة لهذا الفرع</p>
+            </>
+          )}
+        </Card>
+
+        {/* Multi-Evaluator Breakdown - Desktop */}
+        {perf.evaluators.length > 0 && (
+          <Card className="hidden md:block">
+            <CardContent className="p-6">
+              <h3 className="font-bold mb-4">تقرير المشرفين الفردي</h3>
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm text-right min-w-[600px]">
+                  <thead className="text-[12px] text-muted-foreground bg-surface-muted">
+                    <tr>
+                      <th className="px-4 py-3 font-medium">المقيّم</th>
+                      <th className="px-4 py-3 font-medium">الدور</th>
+                      <th className="px-4 py-3 font-medium">عدد التقييمات</th>
+                      <th className="px-4 py-3 font-medium">متوسط الأداء</th>
+                      <th className="px-4 py-3 font-medium">المستوى</th>
+                      <th className="px-4 py-3 font-medium text-left">تقرير فردي</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-border">
+                    {perf.evaluators.map((ev: any) => (
+                      <tr key={ev.id} className="hover:bg-surface-muted/50">
+                        <td className="px-4 py-3 font-medium text-foreground-strong">{ev.name}</td>
+                        <td className="px-4 py-3 text-muted-foreground">{ev.role}</td>
+                        <td className="px-4 py-3 text-muted-foreground numeric">{ev.assessmentCount}</td>
+                        <td className="px-4 py-3">
+                          <div className="flex items-center gap-2">
+                            <Progress value={ev.averageScore} size="sm" className="w-20" tone={ev.averageScore === 100 ? "success" : "default"} />
+                            <span className="text-[12px] font-medium numeric">{ev.averageScore}%</span>
+                          </div>
+                        </td>
+                        <td className="px-4 py-3">
+                          <Badge variant={ev.averageScore >= 90 ? "success" : ev.averageScore >= 75 ? "info" : ev.averageScore >= 50 ? "warning" : "danger"}>
+                            {getPerformanceBand(ev.averageScore)}
+                          </Badge>
+                        </td>
+                        <td className="px-4 py-3 text-left">
+                          <Link href={`/reports/print?scope=evaluator&branchId=${branch.id}&evaluatorId=${ev.id}`}>
+                            <Button variant="outline" size="sm">تقرير فردي</Button>
+                          </Link>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </CardContent>
+          </Card>
+        )}
+
+        {/* Multi-Evaluator Breakdown - Mobile */}
+        {perf.evaluators.length > 0 && (
+          <div className="grid grid-cols-1 gap-4 md:hidden min-w-0">
+            {perf.evaluators.map((ev: any) => (
+              <Card key={ev.id} className="p-4 min-w-0">
+                <div className="flex justify-between items-center mb-2">
+                  <span className="font-medium text-foreground-strong">{ev.name}</span>
+                  <Badge variant={ev.averageScore >= 90 ? "success" : ev.averageScore >= 75 ? "info" : ev.averageScore >= 50 ? "warning" : "danger"}>
+                    {getPerformanceBand(ev.averageScore)}
+                  </Badge>
+                </div>
+                <p className="text-xs text-muted-foreground mb-3">{ev.role} • {ev.assessmentCount} تقييمات</p>
+                <div className="flex items-center gap-2 mb-3">
+                  <Progress value={ev.averageScore} size="sm" className="w-full" tone={ev.averageScore === 100 ? "success" : "default"} />
+                  <span className="text-[12px] font-medium numeric">{ev.averageScore}%</span>
+                </div>
+                <Link href={`/reports/print?scope=evaluator&branchId=${branch.id}&evaluatorId=${ev.id}`}>
+                  <Button variant="outline" size="sm" className="w-full">تقرير فردي</Button>
+                </Link>
+              </Card>
+            ))}
+          </div>
+        )}
+
+        {/* Individual Assessment Scores */}
+        {perf.assessments.length > 0 && (
+          <Card>
+            <CardContent className="p-6 min-w-0">
+              <h3 className="font-bold mb-4">تفاصيل التقييمات المكتملة</h3>
+              <div className="divide-y divide-border">
+                {perf.assessments.map((a: any) => (
+                  <div key={a.id} className="py-3 flex justify-between items-center gap-2">
+                    <div className="min-w-0">
+                      <p className="font-medium text-foreground-strong truncate">{a.assessorName}</p>
+                      <p className="text-xs text-muted-foreground truncate">{a.assessorRole} • {a.verifiedCount}/{a.totalEvidence} شاهد متحقق</p>
+                    </div>
+                    <div className="flex items-center gap-3 shrink-0">
+                      <Badge variant={a.score >= 90 ? "success" : a.score >= 75 ? "info" : a.score >= 50 ? "warning" : "danger"}>
+                        {a.score}%
+                      </Badge>
+                      <Link href={`/quality/assessments/${a.id}/results`}>
+                        <Button variant="ghost" size="sm">عرض</Button>
+                      </Link>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </CardContent>
+          </Card>
+        )}
+
+        <Card className="p-6">
+          <h3 className="font-bold mb-4">تصدير التقارير</h3>
+          <div className="flex flex-wrap gap-3">
+            <form action="/reports/print" method="GET">
+              <input type="hidden" name="scope" value="single" />
+              <input type="hidden" name="schoolId" value={branch.school.id} />
+              <input type="hidden" name="branchId" value={branch.id} />
+              <Button type="submit">تقرير الفرع الشامل (PDF)</Button>
+            </form>
+            <form action="/reports/print" method="GET">
+              <input type="hidden" name="scope" value="comprehensive" />
+              <input type="hidden" name="branchId" value={branch.id} />
+              <Button type="submit" variant="outline">تقرير مقارنة المشرفين (PDF)</Button>
+            </form>
+          </div>
+        </Card>
+      </div>
+    )
+  }
+
+  // === 3. School Manager: School-wide report with multi-evaluator ===
+  if (isSchoolManager && user.schoolId) {
+    const school = await prisma.school.findUnique({
+      where: { id: user.schoolId },
+      include: { 
+        branches: true,
+        assessments: { 
+          where: { type: { not: "PRIVATE_REVIEW" }, status: "COMPLETED" },
+          include: { assessor: true, branch: true }
+        }
+      }
+    })
+
+    if (!school) return null
+
+    const perf = await calculateSchoolPerformance(school.id)
+
+    return (
+      <div className="space-y-6">
+        <PageHeader
+          title={`تقارير ${school.name}`}
+          description="نتائج تقييم الجودة لمدرستك مع دعم متعدد المقيّمين."
+          breadcrumbs={[{ label: 'الرئيسية', href: '/' }, { label: 'التقارير' }]}
+        />
+
+        <Card className="p-8 text-center bg-primary text-white shadow-premium">
+          <h2 className="text-lg font-bold mb-4 text-white">النسبة الإجمالية للأداء</h2>
+          {perf.percentage !== null ? (
+            <>
+              <div className="text-6xl font-bold mb-2 text-white numeric">{perf.percentage}%</div>
+              <Badge variant={perf.percentage >= 90 ? "success" : perf.percentage >= 75 ? "info" : perf.percentage >= 50 ? "warning" : "danger"} className="text-base">{perf.band}</Badge>
+              <p className="text-sm text-primary-100/80 mt-4">
+                بناءً على {perf.assessmentCount} تقييم مكتمل • {perf.evaluators.length} مقيّم • {school.branches.length} فرع
+              </p>
+            </>
+          ) : (
+            <>
+              <div className="text-6xl font-bold mb-2 text-white/60">—</div>
+              <Badge variant="neutral" className="text-base">غير مقيم</Badge>
+              <p className="text-sm text-primary-100/80 mt-4">لا توجد تقييمات مكتملة</p>
+            </>
+          )}
+        </Card>
+
+        {/* Multi-Evaluator Breakdown - Desktop */}
+        {perf.evaluators.length > 0 && (
+          <Card className="hidden md:block">
+            <CardContent className="p-6">
+              <h3 className="font-bold mb-4">تقرير المشرفين</h3>
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm text-right min-w-[500px]">
+                  <thead className="text-[12px] text-muted-foreground bg-surface-muted">
+                    <tr>
+                      <th className="px-4 py-3 font-medium">المقيّم</th>
+                      <th className="px-4 py-3 font-medium">الدور</th>
+                      <th className="px-4 py-3 font-medium">عدد التقييمات</th>
+                      <th className="px-4 py-3 font-medium">متوسط الأداء</th>
+                      <th className="px-4 py-3 font-medium">المستوى</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-border">
+                    {perf.evaluators.map((ev: any) => (
+                      <tr key={ev.id} className="hover:bg-surface-muted/50">
+                        <td className="px-4 py-3 font-medium text-foreground-strong">{ev.name}</td>
+                        <td className="px-4 py-3 text-muted-foreground">{ev.role}</td>
+                        <td className="px-4 py-3 text-muted-foreground numeric">{ev.assessmentCount}</td>
+                        <td className="px-4 py-3">
+                          <div className="flex items-center gap-2">
+                            <Progress value={ev.averageScore} size="sm" className="w-20" />
+                            <span className="text-[12px] font-medium numeric">{ev.averageScore}%</span>
+                          </div>
+                        </td>
+                        <td className="px-4 py-3">
+                          <Badge variant={ev.averageScore >= 90 ? "success" : ev.averageScore >= 75 ? "info" : ev.averageScore >= 50 ? "warning" : "danger"}>
+                            {getPerformanceBand(ev.averageScore)}
+                          </Badge>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </CardContent>
+          </Card>
+        )}
+
+        {/* Multi-Evaluator Breakdown - Mobile */}
+        {perf.evaluators.length > 0 && (
+          <div className="grid grid-cols-1 gap-4 md:hidden min-w-0">
+            {perf.evaluators.map((ev: any) => (
+              <Card key={ev.id} className="p-4 min-w-0">
+                <div className="flex justify-between items-center mb-2">
+                  <span className="font-medium text-foreground-strong">{ev.name}</span>
+                  <Badge variant={ev.averageScore >= 90 ? "success" : ev.averageScore >= 75 ? "info" : ev.averageScore >= 50 ? "warning" : "danger"}>
+                    {getPerformanceBand(ev.averageScore)}
+                  </Badge>
+                </div>
+                <p className="text-xs text-muted-foreground mb-3">{ev.role} • {ev.assessmentCount} تقييمات</p>
+                <div className="flex items-center gap-2">
+                  <Progress value={ev.averageScore} size="sm" className="w-full" />
+                  <span className="text-[12px] font-medium numeric">{ev.averageScore}%</span>
+                </div>
+              </Card>
+            ))}
+          </div>
+        )}
+
+        {/* Individual Assessment List */}
+        {perf.assessments.length > 0 && (
+          <Card>
+            <CardContent className="p-6 min-w-0">
+              <h3 className="font-bold mb-4">سجل التقييمات المكتملة</h3>
+              <div className="divide-y divide-border">
+                {perf.assessments.map((a: any) => (
+                  <div key={a.id} className="py-3 flex justify-between items-center gap-2">
+                    <div className="min-w-0">
+                      <p className="font-medium text-foreground-strong truncate">{a.assessorName}</p>
+                      <p className="text-xs text-muted-foreground truncate">{a.assessorRole} • {a.verifiedCount}/{a.totalEvidence} شاهد</p>
+                    </div>
+                    <Badge variant={a.score >= 90 ? "success" : a.score >= 75 ? "info" : a.score >= 50 ? "warning" : "danger"}>{a.score}%</Badge>
+                  </div>
+                ))}
+              </div>
+            </CardContent>
+          </Card>
+        )}
+
+        <Card className="p-6">
+          <h3 className="font-bold mb-4">تصدير تقرير المدرسة</h3>
+          <form action="/reports/print" method="GET">
+            <input type="hidden" name="scope" value="single" />
+            <input type="hidden" name="schoolId" value={school.id} />
+            <Button type="submit">تجهيز تقرير المدرسة (PDF)</Button>
+          </form>
+        </Card>
+      </div>
+    )
+  }
+
+  // === 4. Quality Assessor: Own assessments ===
+  if (isQualityAssessor && user.schoolId) {
+    const assessments = await prisma.assessment.findMany({
+      where: { 
+        assessorId: user.id, 
+        type: { not: "PRIVATE_REVIEW" } 
+      },
+      include: { school: true, branch: true }
+    })
+
+    const completedAssessments = assessments.filter(a => a.status === "COMPLETED")
+    const totalEvidence = await prisma.fixedEvidence.count()
+    
+    const assessmentScores = await Promise.all(
+      completedAssessments.map(async (a) => {
+        const verified = await prisma.evidenceResponse.count({
+          where: { assessmentId: a.id, isVerified: true }
+        })
+        return {
+          ...a,
+          score: totalEvidence > 0 ? Math.round((verified / totalEvidence) * 100) : 0,
+          verifiedCount: verified
+        }
+      })
+    )
+
+    const avgScore = assessmentScores.length > 0
+      ? Math.round(assessmentScores.reduce((acc, a) => acc + a.score, 0) / assessmentScores.length)
+      : null
+
+    const band = getPerformanceBand(avgScore)
+
+    return (
+      <div className="space-y-6">
+        <PageHeader
+          title="تقارير تقييماتي"
+          description="نتائج تقييمات الجودة التي قمت بإجرائها."
+          breadcrumbs={[{ label: 'الرئيسية', href: '/' }, { label: 'التقارير' }]}
+        />
+
+        <Card className="p-8 text-center bg-primary text-white shadow-premium">
+          <h2 className="text-lg font-bold mb-4 text-white">متوسط نسبة تحقق الشواهد</h2>
+          {avgScore !== null ? (
+            <>
+              <div className="text-6xl font-bold mb-2 text-white numeric">{avgScore}%</div>
+              <Badge variant={avgScore >= 90 ? "success" : avgScore >= 75 ? "info" : avgScore >= 50 ? "warning" : "danger"} className="text-base">{band}</Badge>
+              <p className="text-sm text-primary-100/80 mt-4">
+                بناءً على {completedAssessments.length} تقييم مكتمل
+              </p>
+            </>
+          ) : (
+            <>
+              <div className="text-6xl font-bold mb-2 text-white/60">—</div>
+              <Badge variant="neutral" className="text-base">غير مقيم</Badge>
+              <p className="text-sm text-primary-100/80 mt-4">لا توجد تقييمات مكتملة</p>
+            </>
+          )}
+        </Card>
+
+        <Card>
+          <CardContent className="p-6 min-w-0">
+            <h3 className="font-bold mb-4">سجل تقييماتي</h3>
+            <div className="divide-y divide-border">
+              {assessmentScores.map(a => (
+                <div key={a.id} className="py-3 flex justify-between items-center gap-2">
+                  <div className="min-w-0">
+                    <p className="font-medium text-foreground-strong truncate">{a.school.name}</p>
+                    <p className="text-xs text-muted-foreground truncate">
+                      {a.branch?.name || "كامل المدرسة"} • {a.verifiedCount}/{totalEvidence} شاهد • {a.status === "COMPLETED" ? "مكتمل" : "جاري"}
+                    </p>
+                  </div>
+                  <div className="flex items-center gap-3 shrink-0">
+                    {a.status === "COMPLETED" ? (
+                      <Badge variant={a.score >= 90 ? "success" : a.score >= 75 ? "info" : a.score >= 50 ? "warning" : "danger"}>{a.score}%</Badge>
+                    ) : (
+                      <Badge variant="warning">جاري</Badge>
+                    )}
+                    <Link href={`/quality-assessor/assessments/${a.id}`}>
+                      <Button variant="outline" size="sm">عرض التقييم</Button>
+                    </Link>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+    )
+  }
+
+  return null
+}
+
+===== FILE: src\app\(dashboard)\reports\print\page.tsx =====
+import { prisma } from "@/lib/prisma"
+import { getCurrentUser } from "@/lib/permissions"
+import { redirect } from "next/navigation"
+import { PrintButton } from "@/components/reports/PrintButton"
+import { SemiCircleGauge, VerticalBarChart, DonutChart, PerformanceLegend } from "@/components/charts/AnalyticsCharts"
+import { getPerformanceLevel } from "@/lib/performance"
+
+export default async function PrintReportPage({ searchParams }: { searchParams: { scope: string, schoolId?: string, branchId?: string } }) {
+  const user = await getCurrentUser()
+  if (!user) redirect("/login")
+
+  const isAllSchools = searchParams.scope === "all"
+  const branchId = searchParams.branchId
+  
+  let branchContext: any = null
+  if (branchId) {
+    branchContext = await prisma.branch.findUnique({ where: { id: branchId } })
+  }
+
+  const schools = await prisma.school.findMany({
+    where: isAllSchools ? {} : { id: searchParams.schoolId },
+    include: {
+      assessments: {
+        where: { type: { not: "PRIVATE_REVIEW" }, ...(branchId ? { branchId } : {}) },
+        include: {
+          assessor: true,
+          evidenceResponses: { where: { isVerified: true }, include: { evidence: { include: { indicator: { include: { domain: true, axis: true } } } } } },
+          gaps: { include: { indicator: { include: { domain: true } } } },
+          plans: { include: { actions: true } }
+        }
+      },
+      surveys: true
+    }
+  })
+
+  const officialDomains = await prisma.domain.findMany({ include: { indicators: { include: { fixedEvidence: true } } } })
+
+  return (
+    <div className="bg-white text-black p-4 md:p-8 lg:p-12 min-w-0" dir="rtl">
+      <style>{`
+        @media print { 
+          .no-print { display: none !important; } 
+          .page-break { page-break-before: always; } 
+          body { print-color-adjust: exact; -webkit-print-color-adjust: exact; }
+          @page { size: A4; margin: 10mm; }
+        }
+        
+        .report-header { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 30px; border-bottom: 2px solid #073B43; padding-bottom: 20px; gap: 15px; }
+        .section-title { font-size: 18px; font-weight: 700; color: #073B43; margin-top: 32px; margin-bottom: 16px; border-right: 4px solid #2878B8; padding-right: 12px; }
+        
+        table { width: 100%; border-collapse: collapse; margin-bottom: 24px; font-size: 12px; table-layout: fixed; }
+        th, td { border: 1px solid #ddd; padding: 6px 8px; text-align: right; word-wrap: break-word; overflow-wrap: break-word; word-break: break-word; }
+        th { background-color: #f4f6fb; color: #172B36; }
+      `}</style>
+      
+      <div className="no-print mb-8"><PrintButton /></div>
+
+      {schools.map((school: any, index: number) => {
+        const totalVerified = school.assessments.reduce((acc: number, a: any) => acc + a.evidenceResponses.length, 0)
+        const totalRequired = officialDomains.reduce((acc: number, d: any) => acc + d.indicators.reduce((a: number, i: any) => a + i.fixedEvidence.length, 0), 0)
+        const overallPct = totalRequired > 0 ? Math.round((totalVerified / totalRequired) * 100) : 0
+
+        const domainChartData = officialDomains.map(d => {
+          const dv = school.assessments.flatMap((a: any) => a.evidenceResponses).filter((r: any) => r.evidence.indicator.domainId === d.id).length
+          const dr = d.indicators.reduce((acc: number, i: any) => acc + i.fixedEvidence.length, 0)
+          return { name: d.name, percentage: dr > 0 ? Math.round((dv / dr) * 100) : null }
+        })
+
+        const distributionData = [
+          { label: 'التميز', value: 0, color: '#16A34A' }, { label: 'التقدم', value: 0, color: '#2878B8' },
+          { label: 'الانطلاق', value: 0, color: '#E9A34A' }, { label: 'التهيئة', value: 0, color: '#C62828' },
+          { label: 'غير مقيم', value: 0, color: '#858B95' }
+        ]
+        officialDomains.forEach(d => d.indicators.forEach((ind: any) => {
+          const req = ind.fixedEvidence.length
+          const ver = school.assessments.flatMap((a: any) => a.evidenceResponses).filter((r: any) => r.evidence.indicatorId === ind.id).length
+          const pct = req > 0 ? Math.round((ver / req) * 100) : null
+          const level = getPerformanceLevel(pct)
+          const distItem = distributionData.find(item => item.label === level.label)
+          if (distItem) distItem.value++
+        }))
+
+        return (
+          <div key={school.id} className={index > 0 ? "page-break" : ""}>
+            
+            {/* Report Header */}
+            <div className="report-header">
+              <div className="flex-1 min-w-0 flex items-center gap-3">
+                {school.logoUrl ? (
+                  <img src={school.logoUrl} alt={`${school.name} logo`} style={{ width: '50px', height: '50px', objectFit: 'contain', borderRadius: '8px' }} />
+                ) : (
+                  <div style={{ width: '50px', height: '50px', borderRadius: '8px', backgroundColor: '#f4f6fb', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#073B43', fontWeight: 'bold', fontSize: '20px', flexShrink: 0 }}>
+                    {school.name.charAt(0)}
+                  </div>
+                )}
+                <div className="min-w-0">
+                  <h1 style={{ fontSize: '20px', fontWeight: 'bold', color: '#073B43', marginBottom: '4px', wordWrap: 'break-word' }}>{school.name}</h1>
+                  {branchContext && <p style={{ fontSize: '14px', color: '#2878B8', marginBottom: '4px' }}>الفرع: {branchContext.name}</p>}
+                  <p style={{ fontSize: '12px', color: '#64748B' }}>تاريخ التقرير: {new Date().toLocaleDateString('ar-SA')}</p>
+                </div>
+              </div>
+              <div style={{ textAlign: 'center', flexShrink: 0 }}>
+                <SemiCircleGauge percentage={overallPct} size={120} />
+              </div>
+            </div>
+
+            {/* Charts Section */}
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '20px', marginBottom: '40px' }}>
+              <div style={{ flex: '1 1 300px', minWidth: 0 }}>
+                <h3 style={{ fontSize: '14px', fontWeight: 'bold', color: '#073B43', marginBottom: '12px', borderRight: '3px solid #2878B8', paddingRight: '8px' }}>أداء المجالات</h3>
+                <div style={{ height: '200px', width: '100%' }}><VerticalBarChart data={domainChartData} /></div>
+              </div>
+              <div style={{ flex: '0 0 220px', maxWidth: '100%' }}>
+                <h3 style={{ fontSize: '14px', fontWeight: 'bold', color: '#073B43', marginBottom: '12px', borderRight: '3px solid #2878B8', paddingRight: '8px' }}>توزيع الأداء</h3>
+                <div style={{ height: '200px', width: '100%' }}><DonutChart data={distributionData} /></div>
+              </div>
+            </div>
+
+            <div style={{ marginBottom: '40px' }}>
+              <PerformanceLegend />
+            </div>
+
+            <h3 className="section-title">تفاصيل المجالات والمؤشرات</h3>
+            
+            {/* Desktop Table Layout (Used for Print/PDF) */}
+            <div className="hidden md:block">
+              {officialDomains.map((domain: any) => {
+                const domainIndicators = domain.indicators
+                const domainVerified = school.assessments.flatMap((a: any) => a.evidenceResponses).filter((r: any) => r.evidence.indicator.domainId === domain.id).length
+                const domainRequired = domainIndicators.reduce((acc: number, i: any) => acc + i.fixedEvidence.length, 0)
+                const domainPct = domainRequired > 0 ? Math.round((domainVerified / domainRequired) * 100) : 0
+
+                return (
+                  <div key={domain.id} className="mb-6">
+                    <h4 style={{ fontSize: '16px', fontWeight: 'bold', color: '#172B36', marginBottom: '8px', background: '#f4f6fb', padding: '8px' }}>
+                      {domain.name} <span style={{ fontSize: '14px', fontWeight: 'normal', color: 'gray' }}>(النسبة: {domainPct}%)</span>
+                    </h4>
+                    <table>
+                      <thead>
+                        <tr>
+                          <th style={{ width: '10%' }}>الكود</th>
+                          <th style={{ width: '40%' }}>المؤشر</th>
+                          <th style={{ width: '10%' }}>المطلوب</th>
+                          <th style={{ width: '10%' }}>المتحقق</th>
+                          <th style={{ width: '10%' }}>النسبة</th>
+                          <th style={{ width: '20%' }}>المستوى</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {domainIndicators.map((ind: any) => {
+                          const reqEv = ind.fixedEvidence.length
+                          const verEv = school.assessments.flatMap((a: any) => a.evidenceResponses).filter((r: any) => r.evidence.indicatorId === ind.id).length
+                          const pct = reqEv > 0 ? Math.round((verEv / reqEv) * 100) : 0
+                          const level = getPerformanceLevel(pct)
+                          return (
+                            <tr key={ind.id}>
+                              <td style={{ fontFamily: 'monospace', color: '#079FDF' }}>{ind.code}</td>
+                              <td>{ind.description}</td>
+                              <td style={{ textAlign: 'center' }}>{reqEv}</td>
+                              <td style={{ textAlign: 'center', fontWeight: 'bold', color: '#16A34A' }}>{verEv}</td>
+                              <td style={{ textAlign: 'center', fontWeight: 'bold' }}>{pct}%</td>
+                              <td style={{ textAlign: 'center' }}>
+                                <span style={{ padding: '2px 6px', borderRadius: '10px', fontSize: '10px', fontWeight: '600', backgroundColor: `${level.color}20`, color: level.color }}>{level.label}</span>
+                              </td>
+                            </tr>
+                          )
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                )
+              })}
+            </div>
+
+            {/* Mobile Card Layout (Used for Screen Preview) */}
+            <div className="md:hidden">
+              {officialDomains.map((domain: any) => {
+                const domainIndicators = domain.indicators
+                const domainVerified = school.assessments.flatMap((a: any) => a.evidenceResponses).filter((r: any) => r.evidence.indicator.domainId === domain.id).length
+                const domainRequired = domainIndicators.reduce((acc: number, i: any) => acc + i.fixedEvidence.length, 0)
+                const domainPct = domainRequired > 0 ? Math.round((domainVerified / domainRequired) * 100) : 0
+
+                return (
+                  <div key={domain.id} className="mb-6 border border-gray-200 rounded-lg p-3">
+                    <h4 style={{ fontSize: '16px', fontWeight: 'bold', color: '#172B36', marginBottom: '12px', background: '#f4f6fb', padding: '8px', borderRadius: '6px' }}>
+                      {domain.name} <span style={{ fontSize: '14px', fontWeight: 'normal', color: 'gray' }}>(النسبة: {domainPct}%)</span>
+                    </h4>
+                    <div className="space-y-3">
+                      {domainIndicators.map((ind: any) => {
+                        const reqEv = ind.fixedEvidence.length
+                        const verEv = school.assessments.flatMap((a: any) => a.evidenceResponses).filter((r: any) => r.evidence.indicatorId === ind.id).length
+                        const pct = reqEv > 0 ? Math.round((verEv / reqEv) * 100) : 0
+                        const level = getPerformanceLevel(pct)
+                        return (
+                          <div key={ind.id} className="border-b pb-2">
+                            <div className="flex justify-between items-start mb-1">
+                              <span style={{ fontFamily: 'monospace', color: '#079FDF', fontSize: '12px' }}>{ind.code}</span>
+                              <span style={{ padding: '2px 6px', borderRadius: '10px', fontSize: '10px', fontWeight: '600', backgroundColor: `${level.color}20`, color: level.color }}>{level.label}</span>
+                            </div>
+                            <p style={{ fontSize: '14px', fontWeight: 'bold', color: '#172B36', marginBottom: '4px' }}>{ind.description}</p>
+                            <div className="flex justify-between text-xs text-gray-600">
+                              <span>المطلوب: {reqEv}</span>
+                              <span>المتحقق: {verEv}</span>
+                              <span style={{ fontWeight: 'bold' }}>النسبة: {pct}%</span>
+                            </div>
+                          </div>
+                        )
+                      })}
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
+            
+          </div>
+        )
+      })}
+    </div>
+  )
+}
+
+===== FILE: src\app\(dashboard)\reports\compare\page.tsx =====
+import { prisma } from "@/lib/prisma"
+import { getCurrentUser } from "@/lib/permissions"
+import { redirect } from "next/navigation"
+import { PageHeader } from "@/components/layout/PageHeader"
+import { Card, CardContent } from "@/components/ui/Card"
+import { Badge } from "@/components/ui/Badge"
+import { Button } from "@/components/ui/Button"
+import Link from "next/link"
+import { getBranchAnalytics, EvaluatorAnalytics, AssessmentScore } from "@/features/quality-reports/services/analytics"
+import { getPerformanceBand } from "@/features/quality-assessment/services/analysis"
+
+export default async function EvaluatorComparisonPage({ searchParams }: { searchParams: { branchId?: string, schoolId?: string } }) {
+  const user = await getCurrentUser()
+  if (!user) redirect("/login")
+
+  let branchId = searchParams.branchId
+  if (!branchId && user.branchId) branchId = user.branchId
+  
+  if (!branchId) {
+    return <div className="p-6">الرجاء تحديد فرع</div>
+  }
+
+  const branch = await prisma.branch.findUnique({ where: { id: branchId }, include: { school: true } })
+  if (!branch) return <div>الفرع غير موجود</div>
+
+  // التحقق من الصلاحيات
+  if (user.role === "BRANCH_MANAGER" && user.branchId !== branchId) redirect("/login")
+  if (user.role === "SCHOOL_MANAGER" && user.schoolId !== branch.schoolId) redirect("/login")
+
+  const analytics = await getBranchAnalytics(branchId)
+
+  // جلب درجات المجالات لكل مقيّم
+  const domains = await prisma.domain.findMany({
+    include: {
+      indicators: {
+        include: {
+          fixedEvidence: true,
+          responses: {
+            where: { assessment: { branchId, type: "NORMAL", status: { in: ["IN_PROGRESS", "COMPLETED"] } } },
+            include: { assessment: { select: { assessorId: true } } }
+          }
+        }
+      }
+    }
+  })
+
+  const evaluatorDomainScores: Record<string, { domain: string, score: number }[]> = {}
+  for (const ev of analytics.evaluators) {
+    evaluatorDomainScores[ev.id] = []
+    for (const d of domains) {
+      let required = 0
+      let verified = 0
+      for (const ind of d.indicators) {
+        required += ind.fixedEvidence.length
+        verified += ind.responses.filter(r => r.assessment.assessorId === ev.id).length
+      }
+      const score = required > 0 ? Math.round((verified / required) * 100) : 0
+      evaluatorDomainScores[ev.id].push({ domain: d.name, score })
+    }
+  }
+
+  return (
+    <div className="space-y-6">
+      <PageHeader
+        title="تقرير مقارنة المقيّمين"
+        description={`${branch.school.name} - ${branch.name}`}
+        breadcrumbs={[
+          { label: 'الرئيسية', href: '/' },
+          { label: 'التقارير', href: '/reports' },
+          { label: 'مقارنة المقيّمين' }
+        ]}
+      />
+
+      {/* بطاقات مؤشرات الأداء (KPIs) */}
+      <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+        <Card className="p-4">
+          <p className="text-sm text-muted-foreground">الأداء الإجمالي للفرع (مؤقت)</p>
+          <p className="text-2xl font-bold mt-2">
+            {analytics.provisionalPercentage !== null ? `${analytics.provisionalPercentage}%` : "—"}
+          </p>
+          <Badge variant={analytics.provisionalPercentage === null ? "neutral" : "info"} className="mt-2">
+            {analytics.provisionalPercentage !== null ? getPerformanceBand(analytics.provisionalPercentage) : "غير مقيم"}
+          </Badge>
+        </Card>
+        <Card className="p-4">
+          <p className="text-sm text-muted-foreground">متوسط التقييمات المكتملة</p>
+          <p className="text-2xl font-bold mt-2">
+            {analytics.finalPercentage !== null ? `${analytics.finalPercentage}%` : "—"}
+          </p>
+        </Card>
+        <Card className="p-4">
+          <p className="text-sm text-muted-foreground">عدد التقييمات المؤهلة</p>
+          <p className="text-2xl font-bold mt-2">{analytics.eligibleAssessments}</p>
+          <p className="text-xs text-muted-foreground mt-1">{analytics.completedAssessments} مكتمل / {analytics.inProgressAssessments} جاري</p>
+        </Card>
+        <Card className="p-4">
+          <p className="text-sm text-muted-foreground">عدد المقيّمين</p>
+          <p className="text-2xl font-bold mt-2">{analytics.evaluators.length}</p>
+        </Card>
+      </div>
+
+      {/* رسم بياني لمقارنة أداء المقيّمين */}
+      <Card>
+        <CardContent className="p-6">
+          <h3 className="font-bold mb-4">مقارنة أداء المقيّمين</h3>
+          <div className="space-y-4">
+            {analytics.evaluators.map((ev: EvaluatorAnalytics) => (
+              <div key={ev.id} className="space-y-1">
+                <div className="flex justify-between text-sm">
+                  <span className="font-medium">{ev.name} ({ev.role})</span>
+                  <span className="text-muted-foreground">{ev.provisionalAverage ?? 0}%</span>
+                </div>
+                <div className="w-full bg-surface-muted rounded-full h-4 overflow-hidden">
+                  <div 
+                    className="bg-primary h-4 rounded-full transition-all" 
+                    style={{ width: `${ev.provisionalAverage ?? 0}%` }}
+                  ></div>
+                </div>
+              </div>
+            ))}
+            {analytics.evaluators.length === 0 && (
+              <p className="text-muted-foreground text-center py-4">لا يوجد مقيّمون متاحون</p>
+            )}
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* جدول مقارنة أداء المجالات */}
+      <Card>
+        <CardContent className="p-6">
+          <h3 className="font-bold mb-4">مقارنة أداء المجالات</h3>
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm text-right">
+              <thead className="text-muted-foreground border-b">
+                <tr>
+                  <th className="p-2">المجال</th>
+                  {analytics.evaluators.map((ev: EvaluatorAnalytics) => (
+                    <th key={ev.id} className="p-2 text-center">{ev.name}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {domains.map((d, i) => (
+                  <tr key={d.id} className="border-b">
+                    <td className="p-2 font-medium">{d.name}</td>
+                    {analytics.evaluators.map((ev: EvaluatorAnalytics) => {
+                      const score = evaluatorDomainScores[ev.id]?.[i]?.score ?? 0
+                      return (
+                        <td key={ev.id} className="p-2 text-center">
+                          <span className={`px-2 py-1 rounded text-xs font-bold ${
+                            score >= 90 ? 'bg-success/20 text-success' :
+                            score >= 75 ? 'bg-primary/20 text-primary' :
+                            score >= 50 ? 'bg-warning/20 text-warning' :
+                            'bg-danger/20 text-danger'
+                          }`}>
+                            {score}%
+                          </span>
+                        </td>
+                      )
+                    })}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* جدول تفاصيل التقييمات */}
+      <Card>
+        <CardContent className="p-6">
+          <h3 className="font-bold mb-4">تفاصيل التقييمات</h3>
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm text-right">
+              <thead className="text-muted-foreground border-b">
+                <tr>
+                  <th className="p-2">المقيّم</th>
+                  <th className="p-2">الدور</th>
+                  <th className="p-2">الحالة</th>
+                  <th className="p-2">الشواهد المتحققة</th>
+                  <th className="p-2">النسبة</th>
+                  <th className="p-2">المستوى</th>
+                  <th className="p-2">إجراء</th>
+                </tr>
+              </thead>
+              <tbody>
+                {analytics.assessments.map((a: AssessmentScore) => (
+                  <tr key={a.id} className="border-b hover:bg-surface-muted/50">
+                    <td className="p-2 font-medium">{a.evaluatorName}</td>
+                    <td className="p-2 text-muted-foreground">{a.evaluatorRole}</td>
+                    <td className="p-2">
+                      <Badge variant={a.status === "COMPLETED" ? "success" : "warning"}>
+                        {a.status === "COMPLETED" ? "مكتمل" : "جاري"}
+                      </Badge>
+                    </td>
+                    <td className="p-2 text-muted-foreground numeric">{a.verifiedCount}/{a.totalEvidence}</td>
+                    <td className="p-2 font-bold numeric">{a.score}%</td>
+                    <td className="p-2">
+                      <span className={`px-2 py-1 rounded text-xs font-bold ${
+                        a.score >= 90 ? 'bg-success/20 text-success' :
+                        a.score >= 75 ? 'bg-primary/20 text-primary' :
+                        a.score >= 50 ? 'bg-warning/20 text-warning' :
+                        'bg-danger/20 text-danger'
+                      }`}>
+                        {getPerformanceBand(a.score)}
+                      </span>
+                    </td>
+                    <td className="p-2">
+                      <Link href={`/quality/assessments/${a.id}/results`}>
+                        <Button variant="ghost" size="sm">عرض</Button>
+                      </Link>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* الرؤى والتحليلات */}
+      <Card>
+        <CardContent className="p-6">
+          <h3 className="font-bold mb-4">رؤى وتحليلات</h3>
+          <div className="space-y-3 text-sm text-muted-foreground">
+            {analytics.assessments.length === 0 && <p>لا توجد بيانات كافية لإنشاء رؤى.</p>}
+            {analytics.assessments.length > 0 && (
+              <>
+                <p>• الأداء الإجمالي المؤقت للفرع هو {analytics.provisionalPercentage}% بناءً على {analytics.eligibleAssessments} تقييم مؤهل.</p>
+                {analytics.inProgressAssessments > 0 && (
+                  <p>• يوجد {analytics.inProgressAssessments} تقييم قيد التنفيذ، وقد تتغير النتائج النهائية عند اكتمالها.</p>
+                )}
+                {analytics.evaluators.length > 1 && (
+                  <p>• تم مقارنة أداء {analytics.evaluators.length} مقيّمين في هذا الفرع.</p>
+                )}
+                {analytics.finalPercentage !== null && analytics.provisionalPercentage !== null && analytics.finalPercentage !== analytics.provisionalPercentage && (
+                  <p>• متوسط التقييمات المكتملة ({analytics.finalPercentage}%) يختلف عن الأداء الإجمالي المؤقت ({analytics.provisionalPercentage}%) بسبب وجود تقييمات جارية.</p>
+                )}
+                <p>• تم استبعاد {analytics.excludedAssessments} تقييم (مسودات، أو مراجعات خاصة لا تدخل في المعدل).</p>
+              </>
+            )}
+          </div>
+        </CardContent>
+      </Card>
+    </div>
+  )
+}
+
+===== FILE: src\app\(dashboard)\quality\page.tsx =====
+import { getPlatformAnalytics } from "@/features/quality-reports/services/analytics"
+import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/Card"
+import { Badge } from "@/components/ui/Badge"
+import { Progress } from "@/components/ui/Progress"
+import { MetricCard } from "@/components/dashboard/MetricCard"
+import { School, Building2, ClipboardCheck, AlertTriangle, CheckCircle } from "lucide-react"
+import Link from "next/link"
+import { formatDate } from "@/lib/utils"
+
+export default async function SuperAdminQualityPage() {
+  const data = await getPlatformAnalytics()
+
+  return (
+    <div className="space-y-6">
+      <div>
+        <h1 className="text-2xl font-bold text-foreground">تحليلات الجودة الشاملة</h1>
+        <p className="text-sm text-muted-foreground mt-1">نظرة عامة على أداء المنصة لجميع المدارس</p>
+      </div>
+
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+        <MetricCard title="إجمالي المدارس" value={data.schools} icon={<School className="w-4 h-4" />} />
+        <MetricCard title="إجمالي الفروع" value={data.branches} icon={<Building2 className="w-4 h-4" />} />
+        <MetricCard title="تقييمات نشطة" value={data.activeAssessments} icon={<ClipboardCheck className="w-4 h-4" />} />
+        <MetricCard title="فجوات مفتوحة" value={data.openGaps} icon={<AlertTriangle className="w-4 h-4" />} />
+      </div>
+
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        <Card>
+          <CardHeader><CardTitle>تحليل الاستجابات</CardTitle></CardHeader>
+          <CardContent className="space-y-4">
+            <div>
+              <div className="flex justify-between mb-1">
+                <span className="text-sm font-medium">مؤشرات محققة (Present)</span>
+                <span className="text-sm font-bold text-success">{data.presentCount}</span>
+              </div>
+              <Progress value={data.responseCoverage} className="h-2.5" indicatorClassName="bg-success" />
+            </div>
+            <div>
+              <div className="flex justify-between mb-1">
+                <span className="text-sm font-medium">مؤشرات غير محققة (Gaps)</span>
+                <span className="text-sm font-bold text-danger">{data.notPresentCount}</span>
+              </div>
+              <Progress value={data.notPresentCount > 0 ? Math.round((data.notPresentCount / (data.presentCount + data.notPresentCount)) * 100) : 0} className="h-2.5" indicatorClassName="bg-danger" />
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader><CardTitle>أحدث التقييمات</CardTitle></CardHeader>
+          <CardContent className="p-0">
+            {data.recentAssessments.length === 0 ? (
+              <div className="p-6 text-center text-muted-foreground text-sm">لا توجد تقييمات بعد.</div>
+            ) : (
+              <div className="divide-y divide-border">
+                {data.recentAssessments.map(a => (
+                  <Link href={`/quality/assessments/${a.id}/results`} key={a.id} className="flex justify-between items-center p-4 hover:bg-surface-muted">
+                    <div>
+                      <p className="text-sm font-medium">{a.school.name}</p>
+                      <p className="text-xs text-muted-foreground">{a.branch?.name || "كامل المدرسة"}</p>
+                    </div>
+                    <div className="text-left">
+                      <Badge variant={a.status === "COMPLETED" ? "success" : "warning"}>{a.status}</Badge>
+                      <p className="text-xs text-muted-foreground mt-1">{formatDate(a.startedAt.toISOString())}</p>
+                    </div>
+                  </Link>
+                ))}
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      </div>
+    </div>
+  )
+}
+
+===== FILE: src\app\(dashboard)\quality-assessor\page.tsx =====
+import { prisma } from "@/lib/prisma"
+import { getCurrentUser, getAuthorizedBranchIds } from "@/lib/permissions"
+import { Card, CardContent } from "@/components/ui/Card"
+import { Button } from "@/components/ui/Button"
+import { Badge } from "@/components/ui/Badge"
+import { Progress } from "@/components/ui/Progress"
+import { PageHeader } from "@/components/layout/PageHeader"
+import Link from "next/link"
+import { formatDate } from "@/lib/utils"
+import { ClipboardCheck, CheckCircle, Clock, ArrowLeft, Plus } from "lucide-react"
+import { AssessmentComparisonSelector } from "@/features/quality-assessment/components/AssessmentComparisonSelector"
+import { createNewAssessment } from "@/features/quality-assessment/actions"
+
+export default async function AssessorDashboard() {
+  const user = await getCurrentUser()
+  
+  if (!user || !["QUALITY_ASSESSOR", "SUPER_ADMIN", "SCHOOL_MANAGER", "BRANCH_MANAGER"].includes(user.role)) {
+    return null
+  }
+
+  // تحديد النطاق حسب الدور — عزل صارم على الخادم:
+  // - QUALITY_ASSESSOR: تقييماته هو فقط (سابقاً كان يرى كل تقييمات المدرسة — ثغرة)
+  // - BRANCH_MANAGER: تقييمات فروعه + تقييماته (سابقاً كان يرى كل المدرسة — ثغرة)
+  // - SCHOOL_MANAGER: تقييمات مدرسته
+  // - SUPER_ADMIN: الجميع
+  // مع استبعاد التقييمات الخاصة من القائمة العادية في كل الأحوال
+  let assessorWhere: Record<string, unknown> = { type: { not: "PRIVATE_REVIEW" } }
+
+  if (user.role === "SCHOOL_MANAGER") {
+    assessorWhere.schoolId = user.schoolId
+  } else if (user.role === "BRANCH_MANAGER") {
+    const authorizedBranchIds = await getAuthorizedBranchIds(user)
+    assessorWhere.OR = [{ branchId: { in: authorizedBranchIds } }, { assessorId: user.id }]
+  } else if (user.role === "QUALITY_ASSESSOR") {
+    assessorWhere.assessorId = user.id
+  }
+
+  const assessments = await prisma.assessment.findMany({
+    where: assessorWhere,
+    include: { school: true, branch: true, assessor: true },
+    orderBy: { startedAt: "desc" }
+  })
+
+  const active = assessments.filter(a => a.status === "IN_PROGRESS")
+  const completed = assessments.filter(a => a.status === "COMPLETED")
+  const isSuperAdmin = user.role === "SUPER_ADMIN"
+  const canCreate = ["QUALITY_ASSESSOR", "SCHOOL_MANAGER", "BRANCH_MANAGER"].includes(user.role)
+
+  return (
+    <div className="space-y-8">
+      <PageHeader
+        title={isSuperAdmin ? "نتائج التقييمات" : "لوحة تحكم التقييمات"}
+        description={isSuperAdmin ? "استعراض جميع تقييمات الجودة المسجلة في المنصة." : `أهلاً بك، ${user.name}. يمكنك متابعة التقييمات وإكمالها.`}
+        breadcrumbs={[{ label: 'الرئيسية', href: '/' }, { label: 'التقييمات' }]}
+        actions={
+          canCreate ? (
+            <form action={createNewAssessment}>
+              <Button type="submit" variant="primary" size="md" icon={<Plus className="w-4 h-4" />}>
+                تقييم جديد
+              </Button>
+            </form>
+          ) : undefined
+        }
+      />
+
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+        <Card className="p-5 flex items-center gap-4">
+          <div className="w-12 h-12 rounded-lg bg-warning/10 flex items-center justify-center shrink-0">
+            <Clock className="w-6 h-6 text-warning" />
+          </div>
+          <div>
+            <p className="text-sm text-muted-foreground">قيد التنفيذ</p>
+            <p className="text-2xl font-bold text-foreground-strong numeric">{active.length}</p>
+          </div>
+        </Card>
+        <Card className="p-5 flex items-center gap-4">
+          <div className="w-12 h-12 rounded-lg bg-success/10 flex items-center justify-center shrink-0">
+            <CheckCircle className="w-6 h-6 text-success" />
+          </div>
+          <div>
+            <p className="text-sm text-muted-foreground">مكتملة</p>
+            <p className="text-2xl font-bold text-foreground-strong numeric">{completed.length}</p>
+          </div>
+        </Card>
+        <Card className="p-5 flex items-center gap-4">
+          <div className="w-12 h-12 rounded-lg bg-primary/10 flex items-center justify-center shrink-0">
+            <ClipboardCheck className="w-6 h-6 text-primary" />
+          </div>
+          <div>
+            <p className="text-sm text-muted-foreground">إجمالي التقييمات</p>
+            <p className="text-2xl font-bold text-foreground-strong numeric">{assessments.length}</p>
+          </div>
+        </Card>
+      </div>
+
+      {assessments.length >= 2 && (
+        <AssessmentComparisonSelector assessments={assessments} />
+      )}
+
+      <div>
+        <h2 className="text-section font-bold text-foreground-strong mb-4">جميع التقييمات</h2>
+        {assessments.length === 0 ? (
+          <Card><CardContent className="p-6 text-center text-muted-foreground">لا توجد تقييمات مسجلة حالياً.</CardContent></Card>
+        ) : (
+          <Card className="overflow-hidden">
+            <CardContent className="p-0">
+              <table className="w-full text-sm text-right">
+                <thead className="text-xs text-muted-foreground bg-surface-muted uppercase">
+                  <tr>
+                    <th className="px-5 py-3 font-medium">المدرسة</th>
+                    <th className="px-5 py-3 font-medium">الفرع</th>
+                    <th className="px-5 py-3 font-medium">المُقيّم</th>
+                    <th className="px-5 py-3 font-medium">الدور</th>
+                    <th className="px-5 py-3 font-medium">التقدم</th>
+                    <th className="px-5 py-3 font-medium">الحالة</th>
+                    <th className="px-5 py-3 font-medium hidden lg:table-cell">التاريخ</th>
+                    <th className="px-5 py-3 font-medium text-left"></th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-border">
+                  {assessments.map(a => (
+                    <tr key={a.id} className="hover:bg-surface-muted/50 transition-smooth">
+                      <td className="px-5 py-4 font-medium text-foreground-strong">{a.school.name}</td>
+                      <td className="px-5 py-4 text-muted-foreground">{a.branch?.name || "-"}</td>
+                      <td className="px-5 py-4 text-foreground-strong">{a.assessor?.name || "غير محدد"}</td>
+                      <td className="px-5 py-4">
+                        <Badge variant={
+                          a.assessor?.role === "QUALITY_ASSESSOR" ? "success" :
+                          a.assessor?.role === "SCHOOL_MANAGER" ? "info" :
+                          a.assessor?.role === "BRANCH_MANAGER" ? "warning" : "neutral"
+                        }>
+                          {a.assessor?.role === "QUALITY_ASSESSOR" ? "مشرف" :
+                           a.assessor?.role === "SCHOOL_MANAGER" ? "مدير عام" :
+                           a.assessor?.role === "BRANCH_MANAGER" ? "مدير قسم" : a.assessor?.role}
+                        </Badge>
+                      </td>
+                      <td className="px-5 py-4 min-w-[120px]">
+                        <div className="flex items-center gap-2">
+                          <Progress value={a.progress} size="sm" className="w-16" tone={a.progress === 100 ? "success" : "default"} />
+                          <span className="text-[11px] font-medium text-muted-foreground numeric">{a.progress}%</span>
+                        </div>
+                      </td>
+                      <td className="px-5 py-4">
+                        <Badge variant={a.status === "COMPLETED" ? "success" : "warning"} dot>
+                          {a.status === "COMPLETED" ? "مكتمل" : "جاري"}
+                        </Badge>
+                      </td>
+                      <td className="px-5 py-4 hidden lg:table-cell text-muted-foreground text-xs">
+                        {formatDate(a.startedAt.toISOString())}
+                      </td>
+                      <td className="px-5 py-4 text-left">
+                        <Link href={`/quality-assessor/assessments/${a.id}`}>
+                          <Button variant="ghost" size="sm" icon={<ArrowLeft className="w-4 h-4" />}>
+                            {isSuperAdmin ? "عرض" : "فتح"}
+                          </Button>
+                        </Link>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </CardContent>
+          </Card>
+        )}
+      </div>
+    </div>
+  )
+}
+
+===== FILE: src\app\(dashboard)\quality-assessor\assessments\page.tsx =====
+===== NOT FOUND =====
+
+===== FILE: src\app\(dashboard)\quality-assessor\assessments\[assessmentId]\page.tsx =====
+import { prisma } from "@/lib/prisma"
+import { getCurrentUser, assertAssessmentAccess } from "@/lib/permissions"
+import { redirect } from "next/navigation"
+import { PageHeader } from "@/components/layout/PageHeader"
+import { AssessmentEngine } from "@/features/quality-assessment/components/AssessmentEngine"
+import { Badge } from "@/components/ui/Badge"
+import { Card, CardContent } from "@/components/ui/Card"
+
+export default async function AssessmentPage({ params }: { params: { assessmentId: string } }) {
+  const user = await getCurrentUser()
+  
+  if (!user || !["QUALITY_ASSESSOR", "SUPER_ADMIN", "SCHOOL_MANAGER", "BRANCH_MANAGER"].includes(user.role)) {
+    redirect("/login")
+  }
+
+  const assessment = await prisma.assessment.findUnique({
+    where: { id: params.assessmentId },
+    include: { 
+      school: true, 
+      branch: true,
+      evidenceResponses: true,
+      responses: true,
+      attachments: true
+    },
+  })
+
+  if (!assessment) redirect("/quality-assessor")
+
+  // فحص وصول موحد على الخادم: ملكية المقيّم + نطاق المدرسة/الفرع + عزل التقييمات الخاصة
+  // (سابقاً: المقيّم لم يكن مقيّداً إلا بالملكية — وهذا سليم — لكن الفحص الآن موحد ومركزي)
+  const allowed = await assertAssessmentAccess(user, assessment, "read")
+  if (!allowed) redirect("/quality-assessor")
+
+  const domains = await prisma.domain.findMany({
+    include: { 
+      axes: { 
+        include: { 
+          indicators: {
+            include: {
+              tools: true,
+              fixedEvidence: {
+                orderBy: { paragraphNo: 'asc' } // <--- الإصلاح الأول
+              }
+            }
+          } 
+        } 
+      } 
+    },
+  })
+
+  return (
+    <div className="space-y-6">
+      <PageHeader
+        title="مساحة التقييم"
+        description={`${assessment.school.name} — ${assessment.branch?.name ?? "كامل المدرسة"}`}
+        breadcrumbs={[
+          { label: "الرئيسية", href: "/" },
+          { label: "التقييمات", href: "/quality-assessor" },
+          { label: "مساحة التقييم" },
+        ]}
+        actions={<Badge variant={assessment.status === "COMPLETED" ? "success" : "warning"} dot>{assessment.status === "COMPLETED" ? "مكتمل" : "جاري"}</Badge>}
+      />
+
+      <AssessmentEngine
+        assessment={JSON.parse(JSON.stringify(assessment))}
+        domains={JSON.parse(JSON.stringify(domains))}
+        initialEvidenceResponses={JSON.parse(JSON.stringify(assessment.evidenceResponses))}
+        initialNotesResponses={JSON.parse(JSON.stringify(assessment.responses))}
+        initialAttachments={JSON.parse(JSON.stringify(assessment.attachments))}
+        userRole={user.role}
+        userId={user.id}
+      />
+    </div>
+  )
+}
+
+===== FILE: src\app\(school-manager)\quality\reports\page.tsx =====
+===== NOT FOUND =====
+
+===== FILE: src\app\(school-manager)\reports\page.tsx =====
+===== NOT FOUND =====
+
+===== FILE: src\app\quality\assessments\[assessmentId]\results\page.tsx =====
+import { prisma } from "@/lib/prisma"
+import { getCurrentUser, assertAssessmentAccess } from "@/lib/permissions"
+import { redirect } from "next/navigation"
+import { PageHeader } from "@/components/layout/PageHeader"
+import { Card, CardHeader, CardTitle, CardContent, CardDescription } from "@/components/ui/Card"
+import { StatCard } from "@/components/dashboard/StatCard"
+import { Badge, StatusBadge, PriorityBadge } from "@/components/ui/Badge"
+import { Progress } from "@/components/ui/Progress"
+import { EmptyState } from "@/components/ui/EmptyState"
+import { CheckCircle, XCircle, FileText, AlertTriangle, ArrowRight } from "lucide-react"
+import Link from "next/link"
+import { Button } from "@/components/ui/Button"
+import { formatDate } from "@/lib/utils"
+
+export default async function AssessmentResultsPage({ params }: { params: { assessmentId: string } }) {
+  const user = await getCurrentUser()
+  if (!user) redirect("/login")
+
+  const assessment = await prisma.assessment.findUnique({
+    where: { id: params.assessmentId },
+    include: {
+      school: true, 
+      branch: true, 
+      assessor: true,
+      gaps: { include: { indicator: { include: { domain: true } } } },
+    },
+  })
+  
+  if (!assessment) redirect("/")
+
+  // فحص وصول موحد على الخادم — يغلق ثغرتين:
+  // 1) BRANCH_MANAGER كان بلا أي فحص (يمكنه فتح نتائج أي مدرسة)
+  // 2) التقييمات الخاصة (PRIVATE_REVIEW) كانت تظهر لالمدير العام
+  const allowed = await assertAssessmentAccess(user, assessment, "read")
+  if (!allowed) redirect("/")
+
+  const confirmedGaps = assessment.gaps
+
+  return (
+    <div className="space-y-6 lg:space-y-8">
+      <PageHeader
+        title="نتائج التقييم"
+        description={`${assessment.school.name} — ${assessment.branch?.name ?? "كامل المدرسة"}`}
+        breadcrumbs={[
+          { label: "الرئيسية", href: "/" },
+          { label: "التقييمات" },
+          { label: "النتائج" },
+        ]}
+        actions={
+          <div className="flex items-center gap-3">
+            <StatusBadge status={assessment.status} />
+            <span className="text-[13px] text-muted-foreground numeric">{formatDate(assessment.startedAt.toISOString())}</span>
+          </div>
+        }
+      />
+
+      {/* ===== Executive Summary ===== */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 lg:gap-5">
+        <StatCard
+          label="نسبة الإكمال"
+          value={`${assessment.progress}%`}
+          icon={<FileText className="w-5 h-5" />}
+          tone="info"
+          progress={{ value: assessment.progress }}
+        />
+        <StatCard
+          label="فجوات مكتشفة"
+          value={confirmedGaps.length}
+          icon={<XCircle className="w-5 h-5" />}
+          tone="danger"
+          context="تتطلب تحسيناً"
+        />
+      </div>
+
+      {/* ===== Confirmed Gaps ===== */}
+      <Card variant="primary">
+        <CardHeader>
+          <CardTitle icon={<AlertTriangle className="w-5 h-5" />}>الفجوات المؤكدة</CardTitle>
+          <CardDescription>{confirmedGaps.length} فجوة مسجلة</CardDescription>
+        </CardHeader>
+        <CardContent className="p-0">
+          {confirmedGaps.length === 0 ? (
+            <EmptyState
+              icon={<CheckCircle />}
+              title="لا توجد فجوات مؤكدة"
+              description="جميع المؤشرات المُقيّمة محققة أو لا تنطبق."
+              compact
+            />
+          ) : (
+            <ul className="divide-y divide-border">
+              {confirmedGaps.map((gap) => (
+                <li key={gap.id} className="flex items-start gap-4 p-4 hover:bg-surface-muted transition-smooth">
+                  <div className="tint-danger w-9 h-9 rounded-lg flex items-center justify-center shrink-0">
+                    <AlertTriangle className="w-4 h-4" />
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2 mb-1">
+                      <span className="font-mono text-[12px] text-secondary">{gap.indicator.code}</span>
+                      <PriorityBadge priority={gap.severity} />
+                      <StatusBadge status={gap.status} />
+                    </div>
+                    <p className="text-sm text-foreground-strong">{gap.description}</p>
+                    <p className="text-[12px] text-muted-foreground mt-1">{gap.indicator.domain.name}</p>
+                  </div>
+                  <Link href={`/school-manager/quality/improvement-plans/new?gapId=${gap.id}`}>
+                    <Button variant="soft" size="sm" icon={<ArrowRight className="w-3.5 h-3.5" />}>
+                      خطة تحسين
+                    </Button>
+                  </Link>
+                </li>
+              ))}
+            </ul>
+          )}
+        </CardContent>
+      </Card>
+    </div>
+  )
+}
+
+===== FILE: src\app\quality\assessments\[assessmentId]\page.tsx =====
+===== NOT FOUND =====
+
+===== FILE: src\features\quality-assessment\services\analysis.ts =====
+import { prisma } from "@/lib/prisma"
+import { getCurrentUser, getAuthorizedBranchIds } from "@/lib/permissions"
+
+export interface AssessmentScore {
+  id: string
+  status: string
+  score: number
+  evaluatorId: string
+  evaluatorName: string
+  evaluatorRole: string
+  verifiedCount: number
+  totalEvidence: number
+  branchId?: string | null
+  branchName?: string
+}
+
+export interface EvaluatorAnalytics {
+  id: string
+  name: string
+  role: string
+  assessments: AssessmentScore[]
+  provisionalAverage: number | null
+  finalAverage: number | null
+}
+
+export interface BranchAnalytics {
+  provisionalPercentage: number | null
+  finalPercentage: number | null
+  eligibleAssessments: number
+  completedAssessments: number
+  inProgressAssessments: number
+  excludedAssessments: number
+  evaluators: EvaluatorAnalytics[]
+  assessments: AssessmentScore[]
+}
+
+export async function getPlatformAnalytics() {
+  // الإصلاح: إحصائيات المنصة الشاملة لمدير النظام فقط
+  const user = await getCurrentUser()
+  if (!user || user.role !== "SUPER_ADMIN") {
+    throw new Error("Forbidden")
+  }
+
+  const [schools, branches, assessments, gaps, totalEvidence, verifiedEvidence] = await Promise.all([
+    prisma.school.count(),
+    prisma.branch.count(),
+    prisma.assessment.findMany({ include: { school: true, branch: true, _count: { select: { gaps: true } } }, orderBy: { startedAt: "desc" }, take: 10 }),
+    prisma.gap.findMany({ include: { school: true, branch: true, indicator: true } }),
+    prisma.fixedEvidence.count(),
+    prisma.evidenceResponse.count({ where: { isVerified: true } })
+  ])
+
+  const responseCoverage = totalEvidence > 0 ? Math.round((verifiedEvidence / totalEvidence) * 100) : 0
+
+  return {
+    schools,
+    branches,
+    activeAssessments: assessments.filter(a => a.status === "IN_PROGRESS").length,
+    completedAssessments: assessments.filter(a => a.status === "COMPLETED").length,
+    recentAssessments: assessments,
+    totalGaps: gaps.length,
+    openGaps: gaps.filter(g => g.status === "OPEN").length,
+    presentCount: verifiedEvidence,
+    notPresentCount: gaps.length,
+    responseCoverage
+  }
+}
+
+export async function getSchoolAnalytics(schoolId: string): Promise<BranchAnalytics> {
+  // الإصلاح: تحليلات المدرسة (تتضمن أسماء المقيّمين ونتائجهم) لالمدير العام أو مدير النظام فقط
+  const user = await getCurrentUser()
+  if (!user) throw new Error("Unauthorized")
+  if (user.role !== "SUPER_ADMIN" && !(user.role === "SCHOOL_MANAGER" && user.schoolId === schoolId)) {
+    throw new Error("Forbidden")
+  }
+
+  const totalEvidence = await prisma.fixedEvidence.count()
+  const assessments = await prisma.assessment.findMany({
+    where: { schoolId, type: "NORMAL", status: { in: ["IN_PROGRESS", "COMPLETED"] } },
+    include: {
+      assessor: { select: { id: true, name: true, role: true } },
+      branch: { select: { id: true, name: true } },
+      evidenceResponses: { where: { isVerified: true } }
+    }
+  })
+
+  const excludedAssessments = await prisma.assessment.count({
+    where: { schoolId, OR: [ { type: "PRIVATE_REVIEW" }, { status: "NOT_STARTED" } ] }
+  })
+
+  if (assessments.length === 0) {
+    return {
+      provisionalPercentage: null,
+      finalPercentage: null,
+      eligibleAssessments: 0,
+      completedAssessments: 0,
+      inProgressAssessments: 0,
+      excludedAssessments,
+      evaluators: [],
+      assessments: []
+    }
+  }
+
+  const mapped: AssessmentScore[] = assessments.map(a => ({
+    id: a.id,
+    status: a.status,
+    score: totalEvidence > 0 ? Math.round((a.evidenceResponses.length / totalEvidence) * 100) : 0,
+    evaluatorId: a.assessor?.id ?? "unknown",
+    evaluatorName: a.assessor?.name ?? "غير محدد",
+    evaluatorRole: a.assessor?.role ?? "غير محدد",
+    verifiedCount: a.evidenceResponses.length,
+    totalEvidence,
+    branchId: a.branchId,
+    branchName: a.branch?.name || "كامل المدرسة"
+  }))
+
+  const provisionalPercentage = mapped.length > 0
+    ? Math.round((mapped.reduce((sum, a) => sum + a.score, 0) / mapped.length) * 10) / 10
+    : null
+
+  const completed = mapped.filter(a => a.status === "COMPLETED")
+  const finalPercentage = completed.length > 0
+    ? Math.round((completed.reduce((sum, a) => sum + a.score, 0) / completed.length) * 10) / 10
+    : null
+
+  const evaluatorMap = new Map<string, EvaluatorAnalytics>()
+  for (const a of mapped) {
+    if (!evaluatorMap.has(a.evaluatorId)) {
+      evaluatorMap.set(a.evaluatorId, {
+        id: a.evaluatorId,
+        name: a.evaluatorName,
+        role: a.evaluatorRole,
+        assessments: [],
+        provisionalAverage: 0,
+        finalAverage: null
+      })
+    }
+    evaluatorMap.get(a.evaluatorId)!.assessments.push(a)
+  }
+
+  const evaluators: EvaluatorAnalytics[] = Array.from(evaluatorMap.values()).map(ev => {
+    const evCompleted = ev.assessments.filter(a => a.status === "COMPLETED")
+    ev.provisionalAverage = ev.assessments.length > 0
+      ? Math.round((ev.assessments.reduce((sum, a) => sum + a.score, 0) / ev.assessments.length) * 10) / 10
+      : null
+    ev.finalAverage = evCompleted.length > 0
+      ? Math.round((evCompleted.reduce((sum, a) => sum + a.score, 0) / evCompleted.length) * 10) / 10
+      : null
+    return ev
+  })
+
+  return {
+    provisionalPercentage,
+    finalPercentage,
+    eligibleAssessments: mapped.length,
+    completedAssessments: completed.length,
+    inProgressAssessments: mapped.length - completed.length,
+    excludedAssessments,
+    evaluators,
+    assessments: mapped
+  }
+}
+
+export async function getBranchAnalytics(branchId: string): Promise<BranchAnalytics> {
+  // الإصلاح: تحليلات الفرع لمدير القسم (فرعه) أو المدير العام (فروع مدرسته) أو مدير النظام فقط
+  const user = await getCurrentUser()
+  if (!user) throw new Error("Unauthorized")
+
+  if (user.role !== "SUPER_ADMIN") {
+    if (user.role === "SCHOOL_MANAGER") {
+      const branch = await prisma.branch.findUnique({
+        where: { id: branchId },
+        select: { schoolId: true }
+      })
+      if (!branch || branch.schoolId !== user.schoolId) throw new Error("Forbidden")
+    } else if (user.role === "BRANCH_MANAGER") {
+      const authorizedBranchIds = await getAuthorizedBranchIds(user)
+      if (!authorizedBranchIds.includes(branchId)) throw new Error("Forbidden")
+    } else {
+      // QUALITY_ASSESSOR وأي دور آخر: تحليلات الفرع تتضمن أداء باقي المقيّمين — ممنوعة
+      throw new Error("Forbidden")
+    }
+  }
+
+  const totalEvidence = await prisma.fixedEvidence.count()
+  const assessments = await prisma.assessment.findMany({
+    where: { branchId, type: "NORMAL", status: { in: ["IN_PROGRESS", "COMPLETED"] } },
+    include: {
+      assessor: { select: { id: true, name: true, role: true } },
+      evidenceResponses: { where: { isVerified: true } }
+    }
+  })
+
+  const excludedAssessments = await prisma.assessment.count({
+    where: { branchId, OR: [ { type: "PRIVATE_REVIEW" }, { status: "NOT_STARTED" } ] }
+  })
+
+  if (assessments.length === 0) {
+    return {
+      provisionalPercentage: null,
+      finalPercentage: null,
+      eligibleAssessments: 0,
+      completedAssessments: 0,
+      inProgressAssessments: 0,
+      excludedAssessments,
+      evaluators: [],
+      assessments: []
+    }
+  }
+
+  const mapped: AssessmentScore[] = assessments.map(a => ({
+    id: a.id,
+    status: a.status,
+    score: totalEvidence > 0 ? Math.round((a.evidenceResponses.length / totalEvidence) * 100) : 0,
+    evaluatorId: a.assessor?.id ?? "unknown",
+    evaluatorName: a.assessor?.name ?? "غير محدد",
+    evaluatorRole: a.assessor?.role ?? "غير محدد",
+    verifiedCount: a.evidenceResponses.length,
+    totalEvidence
+  }))
+
+  const provisionalPercentage = mapped.length > 0
+    ? Math.round((mapped.reduce((sum, a) => sum + a.score, 0) / mapped.length) * 10) / 10
+    : null
+
+  const completed = mapped.filter(a => a.status === "COMPLETED")
+  const finalPercentage = completed.length > 0
+    ? Math.round((completed.reduce((sum, a) => sum + a.score, 0) / completed.length) * 10) / 10
+    : null
+
+  const evaluatorMap = new Map<string, EvaluatorAnalytics>()
+  for (const a of mapped) {
+    if (!evaluatorMap.has(a.evaluatorId)) {
+      evaluatorMap.set(a.evaluatorId, {
+        id: a.evaluatorId,
+        name: a.evaluatorName,
+        role: a.evaluatorRole,
+        assessments: [],
+        provisionalAverage: 0,
+        finalAverage: null
+      })
+    }
+    evaluatorMap.get(a.evaluatorId)!.assessments.push(a)
+  }
+
+  const evaluators: EvaluatorAnalytics[] = Array.from(evaluatorMap.values()).map(ev => {
+    const evCompleted = ev.assessments.filter(a => a.status === "COMPLETED")
+    ev.provisionalAverage = ev.assessments.length > 0
+      ? Math.round((ev.assessments.reduce((sum, a) => sum + a.score, 0) / ev.assessments.length) * 10) / 10
+      : null
+    ev.finalAverage = evCompleted.length > 0
+      ? Math.round((evCompleted.reduce((sum, a) => sum + a.score, 0) / evCompleted.length) * 10) / 10
+      : null
+    return ev
+  })
+
+  return {
+    provisionalPercentage,
+    finalPercentage,
+    eligibleAssessments: mapped.length,
+    completedAssessments: completed.length,
+    inProgressAssessments: mapped.length - completed.length,
+    excludedAssessments,
+    evaluators,
+    assessments: mapped
+  }
+}
+// فئات الأداء المعتمدة — مطابقة لحدود الشارات المستخدمة في صفحات التقارير (90 / 75 / 50)
+export function getPerformanceBand(score: number | null): string {
+  if (score === null || Number.isNaN(score)) return "غير مقيم"
+  if (score >= 90) return "ممتاز"
+  if (score >= 75) return "جيد جدًا"
+  if (score >= 50) return "مقبول"
+  return "ضعيف"
+}
+
+===== FILE: src\features\quality-assessment\services\aggregation.ts =====
+import { prisma } from "@/lib/prisma"
+import { getCurrentUser, checkAssessmentAccess } from "@/lib/permissions"
+import { getPerformanceBand } from "./analysis"
+
+export interface ComparisonResult {
+  indicatorCode: string
+  indicatorText: string
+  domain: string
+  responses: Record<string, { value: string; notes?: string | null } | undefined>
+  agreement: boolean
+  evaluatedByAll: boolean
+}
+
+export interface AggregatedResult {
+  totalEvaluations: number
+  averageScore: number
+  performanceBand: string
+  domainAverages: { domain: string; average: number; band: string }[]
+  agreementRate: number
+  totalIndicators: number
+  agreedIndicators: number
+  disagreedIndicators: number
+}
+
+export async function compareAssessments(assessmentIds: string[]) {
+  // الإصلاح: حراسة داخلية — أي مستدٍٍى لهذه الخدمة (صفحة المقارنة أو الطباعة)
+  // يمر إلزامياً عبر فحص الوصول لكل تقييم مطلوب، فلا يمكن استغلالها من مسار منسي
+  const currentUser = await getCurrentUser()
+  if (!currentUser) throw new Error("غير مصرح")
+
+  for (const id of assessmentIds) {
+    const access = await checkAssessmentAccess(id, "read")
+    if (!access.allowed) {
+      throw new Error("غير مصرح بمقارنة أحد التقييمات المحددة")
+    }
+  }
+
+  const assessments = await prisma.assessment.findMany({
+    where: { id: { in: assessmentIds } },
+    include: {
+      assessor: { select: { id: true, name: true, role: true } },
+      school: { select: { name: true } },
+      branch: { select: { name: true } },
+      evidenceResponses: {
+        where: { isVerified: true },
+        include: {
+          evidence: {
+            include: {
+              indicator: {
+                include: { domain: true, axis: true }
+              }
+            }
+          }
+        }
+      },
+      responses: {
+        include: {
+          indicator: true
+        }
+      }
+    }
+  })
+
+  if (assessments.length < 2) {
+    throw new Error("يجب اختيار تقييمين على الأقل للمقارنة")
+  }
+
+  const domains = await prisma.domain.findMany({
+    include: {
+      indicators: {
+        include: { fixedEvidence: true, axis: true }
+      }
+    }
+  })
+
+  const allIndicators = domains.flatMap(d => 
+    d.indicators.map(i => ({
+      code: i.code,
+      text: i.description,
+      domain: d.name,
+      axis: i.axis?.name,
+      requiredEvidence: i.fixedEvidence.length
+    }))
+  )
+
+  const comparisons: ComparisonResult[] = allIndicators.map(indicator => {
+    const responses: Record<string, { value: string; notes?: string | null } | undefined> = {}
+    let allEvaluated = true
+    let allAgree = true
+    let firstValue: string | null = null
+
+    for (const assessment of assessments) {
+      const verifiedCount = assessment.evidenceResponses.filter(
+        er => er.evidence.indicator.code === indicator.code
+      ).length
+
+      const response = assessment.responses.find(
+        r => r.indicator.code === indicator.code
+      )
+
+      const status = verifiedCount > 0 
+        ? `${verifiedCount}/${indicator.requiredEvidence} متحقق`
+        : "لم يُقيّم"
+
+      responses[assessment.assessor?.id ?? "unknown"] = {
+        value: status,
+        notes: response?.notes
+      }
+
+      if (verifiedCount === 0) {
+        allEvaluated = false
+      }
+
+      if (firstValue === null) {
+        firstValue = status
+      } else if (status !== firstValue) {
+        allAgree = false
+      }
+    }
+
+    return {
+      indicatorCode: indicator.code,
+      indicatorText: indicator.text,
+      domain: indicator.domain,
+      responses,
+      agreement: allAgree && allEvaluated,
+      evaluatedByAll: allEvaluated
+    }
+  })
+
+  const totalIndicators = comparisons.length
+  const evaluatedIndicators = comparisons.filter(c => c.evaluatedByAll).length
+  const agreedIndicators = comparisons.filter(c => c.agreement).length
+  const disagreedIndicators = evaluatedIndicators - agreedIndicators
+
+  const assessmentScores = await Promise.all(
+    assessments.map(async (a) => {
+      const totalEvidence = await prisma.fixedEvidence.count()
+      const verifiedEvidence = a.evidenceResponses.length
+      const score = totalEvidence > 0 ? Math.round((verifiedEvidence / totalEvidence) * 100) : 0
+      return { assessorId: a.assessor?.id ?? "unknown", assessorName: a.assessor?.name ?? "غير محدد", score }
+    })
+  )
+
+  const averageScore = assessmentScores.length > 0
+    ? Math.round(assessmentScores.reduce((acc, s) => acc + s.score, 0) / assessmentScores.length)
+    : 0
+
+  const domainAverages = domains.map(d => {
+    const domainIndicators = comparisons.filter(c => c.domain === d.name && c.evaluatedByAll)
+    const domainAgreed = domainIndicators.filter(c => c.agreement).length
+    const avg = domainIndicators.length > 0
+      ? Math.round((domainAgreed / domainIndicators.length) * 100)
+      : 0
+    return {
+      domain: d.name,
+      average: avg,
+      band: getPerformanceBand(avg)
+    }
+  })
+
+  const agreementRate = evaluatedIndicators > 0
+    ? Math.round((agreedIndicators / evaluatedIndicators) * 100)
+    : 0
+
+  const result: AggregatedResult = {
+    totalEvaluations: assessments.length,
+    averageScore,
+    performanceBand: getPerformanceBand(averageScore),
+    domainAverages,
+    agreementRate,
+    totalIndicators,
+    agreedIndicators,
+    disagreedIndicators
+  }
+
+  return {
+    assessments: assessments.map(a => ({
+      id: a.id,
+      assessorName: a.assessor?.name ?? "غير محدد",
+      assessorRole: a.assessor?.role ?? "غير محدد",
+      schoolName: a.school?.name || "",
+      branchName: a.branch?.name || "",
+      status: a.status,
+      progress: a.progress,
+      startedAt: a.startedAt,
+      submittedAt: a.submittedAt
+    })),
+    comparisons,
+    aggregated: result,
+    assessmentScores
+  }
+}
+
+===== FILE: src\features\quality-assessment\actions.ts =====
+"use server"
+
+import { prisma } from "@/lib/prisma"
+import { getCurrentUser, checkAssessmentAccess } from "@/lib/permissions"
+import { revalidatePath } from "next/cache"
+import { redirect } from "next/navigation"
+
+export async function saveEvidenceResponse(assessmentId: string, evidenceId: string, isVerified: boolean, visitNumber: number = 0, scoreValue?: number) {
+  const user = await getCurrentUser()
+  if (!user) throw new Error("Unauthorized")
+
+  const assessment = await prisma.assessment.findUnique({
+    where: { id: assessmentId },
+    select: { id: true, assessorId: true, schoolId: true, branchId: true, type: true, status: true }
+  })
+
+  if (!assessment) throw new Error("Assessment not found")
+
+  // 1. التحقق من الملكية الصارمة لعزل التقييمات
+  if (user.role === "SUPER_ADMIN") {
+    if (assessment.type !== "PRIVATE_REVIEW") {
+      throw new Error("Forbidden: Super Admin cannot modify operational assessments")
+    }
+    if (assessment.assessorId !== user.id) {
+      throw new Error("Forbidden: You can only edit your own private reviews.")
+    }
+  } else {
+    if (assessment.type === "PRIVATE_REVIEW") {
+      throw new Error("Forbidden: Cannot modify private review")
+    }
+    // منع أي مستخدم من تعديل تقييم يخص مستخدماً آخر
+    if (assessment.assessorId !== user.id) {
+      throw new Error("Forbidden: You can only modify assessments assigned to you.")
+    }
+    // فحوصات النطاق الإضافية للأمان
+    if (user.role === "SCHOOL_MANAGER" && assessment.schoolId !== user.schoolId) throw new Error("Forbidden: Out of scope")
+    if (user.role === "BRANCH_MANAGER" && assessment.branchId !== user.branchId) throw new Error("Forbidden: Out of scope")
+  }
+
+  if (isVerified) {
+    await prisma.evidenceResponse.upsert({
+      where: {
+        assessmentId_evidenceId_visitNumber: {
+          assessmentId,
+          evidenceId,
+          visitNumber
+        }
+      },
+      update: { isVerified, scoreValue: scoreValue || null },
+      create: {
+        assessmentId,
+        evidenceId,
+        isVerified,
+        visitNumber,
+        scoreValue: scoreValue || null
+      }
+    })
+  } else {
+    await prisma.evidenceResponse.deleteMany({
+      where: { assessmentId, evidenceId, visitNumber }
+    })
+  }
+
+  const totalEvidence = await prisma.fixedEvidence.count()
+  const verifiedEvidence = await prisma.evidenceResponse.count({
+    where: { assessmentId, isVerified: true }
+  })
+  
+  const progress = totalEvidence > 0 ? Math.round((verifiedEvidence / totalEvidence) * 100) : 0
+  
+  await prisma.assessment.update({
+    where: { id: assessmentId },
+    data: { progress, status: "IN_PROGRESS" }
+  })
+}
+
+export async function finishAssessment(assessmentId: string) {
+  const user = await getCurrentUser()
+  if (!user) throw new Error("Unauthorized")
+
+  if (user.role === "SUPER_ADMIN") {
+    throw new Error("Forbidden: Super Admin cannot finish assessments through this action. Use the private review workflow if applicable.")
+  }
+
+  const assessment = await prisma.assessment.findUnique({
+    where: { id: assessmentId },
+    select: { assessorId: true, schoolId: true, branchId: true, type: true }
+  })
+
+  if (!assessment) throw new Error("Assessment not found")
+
+  // التحقق من الملكية الصارمة
+  if (assessment.assessorId !== user.id) {
+    throw new Error("Forbidden: You can only finish your own assessments.")
+  }
+
+  if (user.role === "SCHOOL_MANAGER" && assessment.schoolId !== user.schoolId) throw new Error("Forbidden")
+  if (user.role === "BRANCH_MANAGER" && assessment.branchId !== user.branchId) throw new Error("Forbidden")
+
+  const totalIndicators = await prisma.indicator.count({ where: { coverage: "مغطى" } })
+  const answeredIndicators = await prisma.evidenceResponse.count({ 
+    where: { assessmentId, isVerified: true } 
+  })
+
+  if (answeredIndicators < totalIndicators) {
+    throw new Error("Cannot finish: There are uncovered indicators remaining.")
+  }
+
+  await prisma.assessment.update({
+    where: { id: assessmentId },
+    data: { 
+      status: "COMPLETED", 
+      completedAt: new Date(),
+      submittedAt: new Date()
+    },
+  })
+
+  if (assessment.type !== "PRIVATE_REVIEW") {
+    const unverifiedEvidence = await prisma.fixedEvidence.findMany({
+      where: {
+        NOT: {
+          responses: {
+            some: {
+              assessmentId,
+              isVerified: true
+            }
+          }
+        }
+      },
+      include: { indicator: true }
+    })
+
+    for (const ev of unverifiedEvidence) {
+      const existingGap = await prisma.gap.findFirst({
+        where: { assessmentId, indicatorId: ev.indicatorId }
+      })
+
+      if (!existingGap) {
+        await prisma.gap.create({
+          data: {
+            schoolId: assessment.schoolId,
+            branchId: assessment.branchId,
+            assessmentId,
+            indicatorId: ev.indicatorId,
+            description: `مؤشر لم يثبت تحققه: ${ev.indicator.description}`,
+            severity: "HIGH",
+            status: "OPEN"
+          }
+        })
+      }
+    }
+
+    await prisma.activity.create({
+      data: {
+        actorId: user.id,
+        schoolId: assessment.schoolId,
+        branchId: assessment.branchId,
+        action: "SUBMIT",
+        entityType: "ASSESSMENT",
+        entityId: assessmentId,
+        metadata: { description: `تم تسليم تقييم بواسطة ${user.name}` }
+      }
+    })
+  }
+
+  revalidatePath("/quality-assessor")
+  revalidatePath(`/quality-assessor/assessments/${assessmentId}`)
+}
+
+export async function uploadAttachment(assessmentId: string, evidenceId: string, file: { name: string, type: string, size: number, data: string }) {
+  const user = await getCurrentUser()
+  if (!user) throw new Error("Unauthorized")
+
+  // الإصلاح: كان هذا الإجراء مفتوحاً لأي مستخدم على أي تقييم — الآن يُفرض فحص الكتابة
+  const access = await checkAssessmentAccess(assessmentId, "write")
+  if (!access.allowed) {
+    throw new Error("Forbidden: You can only modify assessments assigned to you.")
+  }
+
+  const allowedTypes = ['application/pdf', 'application/msword', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', 'image/jpeg', 'image/png', 'image/svg+xml']
+  if (!allowedTypes.includes(file.type)) throw new Error("نوع الملف غير مدعوم")
+  if (file.size > 2 * 1024 * 1024) throw new Error("حجم الملف يتجاوز 2 ميجابايت")
+
+  return await prisma.assessmentAttachment.create({
+    data: {
+      assessmentId,
+      evidenceId,
+      uploadedById: user.id,
+      fileName: file.name,
+      fileType: file.type,
+      fileSize: file.size,
+      fileData: file.data
+    }
+  })
+}
+
+export async function deleteAttachment(attachmentId: string, assessmentId: string) {
+  const user = await getCurrentUser()
+  if (!user) throw new Error("Unauthorized")
+
+  // الإصلاح: كان هذا الإجراء يحذف أي مرفق بأي ID بدون أي فحص — ثغرة حذف جماعي
+  const attachment = await prisma.assessmentAttachment.findUnique({
+    where: { id: attachmentId }
+  })
+  if (!attachment || attachment.assessmentId !== assessmentId) {
+    throw new Error("Attachment not found")
+  }
+
+  const access = await checkAssessmentAccess(assessmentId, "write")
+  if (!access.allowed) {
+    throw new Error("Forbidden: You can only modify assessments assigned to you.")
+  }
+
+  return await prisma.assessmentAttachment.delete({
+    where: { id: attachmentId }
+  })
+}
+
+export async function createNewAssessment() {
+  const user = await getCurrentUser()
+  if (!user || !user.schoolId) throw new Error("Unauthorized")
+
+  const assessment = await prisma.assessment.create({
+    data: {
+      schoolId: user.schoolId,
+      branchId: user.branchId || null,
+      assessorId: user.id,
+      status: "IN_PROGRESS",
+      type: "NORMAL"
+    }
+  })
+  redirect(`/quality-assessor/assessments/${assessment.id}`)
+}
+
+===== FILE: src\features\quality-reports\services\analytics.ts =====
+import { prisma } from "@/lib/prisma"
+import { getCurrentUser } from "@/lib/permissions"
+
+export interface AssessmentScore {
+  id: string
+  status: string
+  score: number
+  evaluatorId: string
+  evaluatorName: string
+  evaluatorRole: string
+  verifiedCount: number
+  totalEvidence: number
+  branchId?: string | null
+  branchName?: string
+}
+
+export interface EvaluatorAnalytics {
+  id: string
+  name: string
+  role: string
+  assessments: AssessmentScore[]
+  provisionalAverage: number | null
+  finalAverage: number | null
+}
+
+export interface BranchAnalytics {
+  provisionalPercentage: number | null
+  finalPercentage: number | null
+  eligibleAssessments: number
+  completedAssessments: number
+  inProgressAssessments: number
+  excludedAssessments: number
+  evaluators: EvaluatorAnalytics[]
+  assessments: AssessmentScore[]
+}
+
+// الإصلاح الأمني: هذه الخدمة كانت مكشوفة لأي مستخدم مسجل عبر صفحة /quality
+// (بينما النسخة الموازية في quality-assessment/services/analysis.ts محمية).
+// إحصائيات المنصة الشاملة (كل المدارس) لمدير النظام فقط.
+export async function getPlatformAnalytics() {
+  const user = await getCurrentUser()
+  if (!user || user.role !== "SUPER_ADMIN") {
+    throw new Error("Forbidden")
+  }
+
+  const [schools, branches, assessments, gaps, totalEvidence, verifiedEvidence] = await Promise.all([
+    prisma.school.count(),
+    prisma.branch.count(),
+    prisma.assessment.findMany({ include: { school: true, branch: true, _count: { select: { gaps: true } } }, orderBy: { startedAt: "desc" }, take: 10 }),
+    prisma.gap.findMany({ include: { school: true, branch: true, indicator: true } }),
+    prisma.fixedEvidence.count(),
+    prisma.evidenceResponse.count({ where: { isVerified: true } })
+  ])
+
+  const responseCoverage = totalEvidence > 0 ? Math.round((verifiedEvidence / totalEvidence) * 100) : 0
+
+  return {
+    schools,
+    branches,
+    activeAssessments: assessments.filter(a => a.status === "IN_PROGRESS").length,
+    completedAssessments: assessments.filter(a => a.status === "COMPLETED").length,
+    recentAssessments: assessments,
+    totalGaps: gaps.length,
+    openGaps: gaps.filter(g => g.status === "OPEN").length,
+    presentCount: verifiedEvidence,
+    notPresentCount: gaps.length,
+    responseCoverage
+  }
+}
+
+export async function getSchoolAnalytics(schoolId: string): Promise<BranchAnalytics> {
+  const totalEvidence = await prisma.fixedEvidence.count()
+  const assessments = await prisma.assessment.findMany({
+    where: { schoolId, type: "NORMAL", status: { in: ["IN_PROGRESS", "COMPLETED"] } },
+    include: {
+      assessor: { select: { id: true, name: true, role: true } },
+      branch: { select: { id: true, name: true } },
+      evidenceResponses: { where: { isVerified: true } }
+    }
+  })
+
+  const excludedAssessments = await prisma.assessment.count({
+    where: { schoolId, OR: [ { type: "PRIVATE_REVIEW" }, { status: "NOT_STARTED" } ] }
+  })
+
+  if (assessments.length === 0) {
+    return {
+      provisionalPercentage: null,
+      finalPercentage: null,
+      eligibleAssessments: 0,
+      completedAssessments: 0,
+      inProgressAssessments: 0,
+      excludedAssessments,
+      evaluators: [],
+      assessments: []
+    }
+  }
+
+  const mapped: AssessmentScore[] = assessments.map(a => ({
+    id: a.id,
+    status: a.status,
+    score: totalEvidence > 0 ? Math.round((a.evidenceResponses.length / totalEvidence) * 100) : 0,
+    evaluatorId: a.assessor?.id ?? "unknown",
+    evaluatorName: a.assessor?.name ?? "غير محدد",
+    evaluatorRole: a.assessor?.role ?? "غير محدد",
+    verifiedCount: a.evidenceResponses.length,
+    totalEvidence,
+    branchId: a.branchId,
+    branchName: a.branch?.name || "كامل المدرسة"
+  }))
+
+  const provisionalPercentage = mapped.length > 0
+    ? Math.round((mapped.reduce((sum, a) => sum + a.score, 0) / mapped.length) * 10) / 10
+    : null
+
+  const completed = mapped.filter(a => a.status === "COMPLETED")
+  const finalPercentage = completed.length > 0
+    ? Math.round((completed.reduce((sum, a) => sum + a.score, 0) / completed.length) * 10) / 10
+    : null
+
+  const evaluatorMap = new Map<string, EvaluatorAnalytics>()
+  for (const a of mapped) {
+    if (!evaluatorMap.has(a.evaluatorId)) {
+      evaluatorMap.set(a.evaluatorId, {
+        id: a.evaluatorId,
+        name: a.evaluatorName,
+        role: a.evaluatorRole,
+        assessments: [],
+        provisionalAverage: 0,
+        finalAverage: null
+      })
+    }
+    evaluatorMap.get(a.evaluatorId)!.assessments.push(a)
+  }
+
+  const evaluators: EvaluatorAnalytics[] = Array.from(evaluatorMap.values()).map(ev => {
+    const evCompleted = ev.assessments.filter(a => a.status === "COMPLETED")
+    ev.provisionalAverage = ev.assessments.length > 0
+      ? Math.round((ev.assessments.reduce((sum, a) => sum + a.score, 0) / ev.assessments.length) * 10) / 10
+      : null
+    ev.finalAverage = evCompleted.length > 0
+      ? Math.round((evCompleted.reduce((sum, a) => sum + a.score, 0) / evCompleted.length) * 10) / 10
+      : null
+    return ev
+  })
+
+  return {
+    provisionalPercentage,
+    finalPercentage,
+    eligibleAssessments: mapped.length,
+    completedAssessments: completed.length,
+    inProgressAssessments: mapped.length - completed.length,
+    excludedAssessments,
+    evaluators,
+    assessments: mapped
+  }
+}
+
+export async function getBranchAnalytics(branchId: string): Promise<BranchAnalytics> {
+  const totalEvidence = await prisma.fixedEvidence.count()
+  const assessments = await prisma.assessment.findMany({
+    where: { branchId, type: "NORMAL", status: { in: ["IN_PROGRESS", "COMPLETED"] } },
+    include: {
+      assessor: { select: { id: true, name: true, role: true } },
+      evidenceResponses: { where: { isVerified: true } }
+    }
+  })
+
+  const excludedAssessments = await prisma.assessment.count({
+    where: { branchId, OR: [ { type: "PRIVATE_REVIEW" }, { status: "NOT_STARTED" } ] }
+  })
+
+  if (assessments.length === 0) {
+    return {
+      provisionalPercentage: null,
+      finalPercentage: null,
+      eligibleAssessments: 0,
+      completedAssessments: 0,
+      inProgressAssessments: 0,
+      excludedAssessments,
+      evaluators: [],
+      assessments: []
+    }
+  }
+
+  const mapped: AssessmentScore[] = assessments.map(a => ({
+    id: a.id,
+    status: a.status,
+    score: totalEvidence > 0 ? Math.round((a.evidenceResponses.length / totalEvidence) * 100) : 0,
+    evaluatorId: a.assessor?.id ?? "unknown",
+    evaluatorName: a.assessor?.name ?? "غير محدد",
+    evaluatorRole: a.assessor?.role ?? "غير محدد",
+    verifiedCount: a.evidenceResponses.length,
+    totalEvidence
+  }))
+
+  const provisionalPercentage = mapped.length > 0
+    ? Math.round((mapped.reduce((sum, a) => sum + a.score, 0) / mapped.length) * 10) / 10
+    : null
+
+  const completed = mapped.filter(a => a.status === "COMPLETED")
+  const finalPercentage = completed.length > 0
+    ? Math.round((completed.reduce((sum, a) => sum + a.score, 0) / completed.length) * 10) / 10
+    : null
+
+  const evaluatorMap = new Map<string, EvaluatorAnalytics>()
+  for (const a of mapped) {
+    if (!evaluatorMap.has(a.evaluatorId)) {
+      evaluatorMap.set(a.evaluatorId, {
+        id: a.evaluatorId,
+        name: a.evaluatorName,
+        role: a.evaluatorRole,
+        assessments: [],
+        provisionalAverage: 0,
+        finalAverage: null
+      })
+    }
+    evaluatorMap.get(a.evaluatorId)!.assessments.push(a)
+  }
+
+  const evaluators: EvaluatorAnalytics[] = Array.from(evaluatorMap.values()).map(ev => {
+    const evCompleted = ev.assessments.filter(a => a.status === "COMPLETED")
+    ev.provisionalAverage = ev.assessments.length > 0
+      ? Math.round((ev.assessments.reduce((sum, a) => sum + a.score, 0) / ev.assessments.length) * 10) / 10
+      : null
+    ev.finalAverage = evCompleted.length > 0
+      ? Math.round((evCompleted.reduce((sum, a) => sum + a.score, 0) / evCompleted.length) * 10) / 10
+      : null
+    return ev
+  })
+
+  return {
+    provisionalPercentage,
+    finalPercentage,
+    eligibleAssessments: mapped.length,
+    completedAssessments: completed.length,
+    inProgressAssessments: mapped.length - completed.length,
+    excludedAssessments,
+    evaluators,
+    assessments: mapped
+  }
+}
+
+===== FILE: src\lib\permissions.ts =====
+import { auth } from "@/lib/auth"
+import { redirect } from "next/navigation"
+import { prisma } from "@/lib/prisma"
+
+export async function getCurrentUser() {
+  const session = await auth()
+  if (!session?.user) return null
+
+  // جلب أحدث بيانات من قاعدة البيانات لضمان ظهور التحديثات فوراً (مثل تغيير الاسم)
+  const dbUser = await prisma.user.findUnique({
+    where: { id: session.user.id }
+  })
+
+  return dbUser
+}
+
+export async function requireRole(roles: string[]) {
+  const user = await getCurrentUser()
+  if (!user || !roles.includes(user.role)) {
+    redirect("/login")
+  }
+  return user
+}
+
+export async function requireSchoolAccess(schoolId: string) {
+  const user = await getCurrentUser()
+  if (!user) redirect("/login")
+
+  if (user.role === "SUPER_ADMIN") return true
+
+  if (user.schoolId !== schoolId) {
+    throw new Error("Unauthorized: Tenant isolation violation")
+  }
+  return true
+}
+
+/**
+ * كل الفروع التي يُسمح للمستخدم بالعمل عليها:
+ * - الفرع المرتبط به مباشرة (User.branchId)
+ * - الفروع التي يديرها عبر Branch.managerId (علاقة "BranchManager")
+ * هذا يعالج الربط المزدوج في المخطط دون أي تغيير على قاعدة البيانات.
+ */
+export async function getAuthorizedBranchIds(
+  user: { id: string; branchId: string | null }
+): Promise<string[]> {
+  const ids: string[] = []
+  if (user.branchId) ids.push(user.branchId)
+
+  const managed = await prisma.branch.findMany({
+    where: { managerId: user.id },
+    select: { id: true }
+  })
+  for (const b of managed) {
+    if (!ids.includes(b.id)) ids.push(b.id)
+  }
+  return ids
+}
+
+export async function requireBranchAccess(branchId: string) {
+  const user = await getCurrentUser()
+  if (!user) redirect("/login")
+
+  if (user.role === "SUPER_ADMIN") return true
+
+  if (user.role === "SCHOOL_MANAGER") {
+    const branch = await prisma.branch.findUnique({ where: { id: branchId } })
+    if (!branch || branch.schoolId !== user.schoolId) throw new Error("Unauthorized")
+    return true
+  }
+
+  // BRANCH_MANAGER و QUALITY_ASSESSOR: مقصورون على فروعهم الفعلية
+  // (سابقاً كان QUALITY_ASSESSOR يتجاوز هذا الفحص بالكامل — ثغرة أُغلقت)
+  const authorizedBranchIds = await getAuthorizedBranchIds(user)
+  if (!authorizedBranchIds.includes(branchId)) {
+    throw new Error("Unauthorized: Branch isolation violation")
+  }
+  return true
+}
+
+// ===== عزل التقييمات (المشكلة 3) — القاعدة الموحدة =====
+
+export interface AssessmentScopeRow {
+  id: string
+  schoolId: string
+  branchId: string | null
+  assessorId: string | null
+  type: string
+}
+
+export type CurrentUser = NonNullable<Awaited<ReturnType<typeof getCurrentUser>>>
+
+/**
+ * القراءة:
+ *  - SUPER_ADMIN: كل التقييمات التشغيلية + تقييماته الخاصة فقط.
+ *  - SCHOOL_MANAGER: كل تقييمات مدرسته (عدا الخاصة).
+ *  - BRANCH_MANAGER: تقييمات فروعه + تقييماته هو (عدا الخاصة).
+ *  - QUALITY_ASSESSOR: تقييماته هو فقط.
+ *  - PRIVATE_REVIEW: مالكه فقط (وهو مدير النظام دائماً) — قراءةً وكتابةً.
+ * الكتابة:
+ *  - مدير النظام لا يعدّل التقييمات التشغيلية (قاعدة قائمة في saveEvidenceResponse).
+ *  - غيره: يجب أن يكون هو المُقيّم المالك (assessorId) مع احترام نطاق المدرسة/الفرع.
+ */
+export async function assertAssessmentAccess(
+  user: CurrentUser,
+  assessment: AssessmentScopeRow,
+  mode: "read" | "write" = "read"
+): Promise<boolean> {
+  const isPrivate = assessment.type === "PRIVATE_REVIEW"
+
+  // التقييم الخاص سري ولا يُشارك مع أي أحد غير مالكه
+  if (isPrivate) {
+    return user.role === "SUPER_ADMIN" && assessment.assessorId === user.id
+  }
+
+  if (user.role === "SUPER_ADMIN") {
+    // القراءة مسموحة، والكتابة على التشغيلي ممنوعة (سلوك قائم في النظام)
+    return mode === "read"
+  }
+
+  if (user.role === "SCHOOL_MANAGER") {
+    if (mode === "read") return assessment.schoolId === user.schoolId
+    // الكتابة: يجب أن يكون هو المُقيّم + ضمن مدرسته
+    return assessment.assessorId === user.id && assessment.schoolId === user.schoolId
+  }
+
+  if (user.role === "BRANCH_MANAGER") {
+    if (assessment.assessorId === user.id) {
+      // تقييمه هو: يقرأه ويكتبه دائماً
+      return true
+    }
+    const authorizedBranchIds = await getAuthorizedBranchIds(user)
+    if (mode === "read") {
+      return !!assessment.branchId && authorizedBranchIds.includes(assessment.branchId)
+    }
+    return false
+  }
+
+  // QUALITY_ASSESSOR: تقييماته هو فقط — قراءةً وكتابةً
+  return assessment.assessorId === user.id
+}
+
+/**
+ * يجلب التقييم ويفحص الوصول في خطوة واحدة — للاستخدام داخل Server Actions.
+ */
+export async function checkAssessmentAccess(
+  assessmentId: string,
+  mode: "read" | "write" = "read"
+): Promise<{ allowed: boolean; assessment: AssessmentScopeRow | null }> {
+  const user = await getCurrentUser()
+  if (!user) return { allowed: false, assessment: null }
+
+  const assessment = await prisma.assessment.findUnique({
+    where: { id: assessmentId },
+    select: { id: true, schoolId: true, branchId: true, assessorId: true, type: true }
+  })
+  if (!assessment) return { allowed: false, assessment: null }
+
+  const allowed = await assertAssessmentAccess(user, assessment, mode)
+  return { allowed, assessment }
+}
+
+===== FILE: src\lib\performance.ts =====
+export interface PerformanceLevel {
+  label: string
+  color: string
+  level: number
+}
+
+export function getPerformanceLevel(percentage: number | null | undefined): PerformanceLevel {
+  if (percentage === null || percentage === undefined || isNaN(percentage as number)) {
+    return { label: 'غير مقيم', color: '#858B95', level: 0 }
+  }
+  if (percentage >= 90) return { label: 'التميز', color: '#16A34A', level: 4 }
+  if (percentage >= 75) return { label: 'التقدم', color: '#2878B8', level: 3 }
+  if (percentage >= 60) return { label: 'الانطلاق', color: '#E9A34A', level: 2 }
+  if (percentage >= 50) return { label: 'التهيئة', color: '#C62828', level: 1 }
+  return { label: 'غير مقيم', color: '#858B95', level: 0 }
+}
+
+===== FILE: src\features\quality-assessment\components\AssessmentComparisonSelector.tsx =====
+"use client"
+
+import { useState } from "react"
+import { useRouter } from "next/navigation"
+import { Button } from "@/components/ui/Button"
+import { Card, CardContent } from "@/components/ui/Card"
+import { GitCompare } from "lucide-react"
+import { cn } from "@/lib/utils"
+
+interface AssessmentComparisonSelectorProps {
+  assessments: any[]
+}
+
+export function AssessmentComparisonSelector({ assessments }: AssessmentComparisonSelectorProps) {
+  const [selected, setSelected] = useState<string[]>([])
+  const router = useRouter()
+
+  const handleToggle = (id: string) => {
+    if (selected.includes(id)) {
+      setSelected(selected.filter(s => s !== id))
+    } else if (selected.length < 4) {
+      setSelected([...selected, id])
+    }
+  }
+
+  const handleCompare = () => {
+    if (selected.length >= 2) {
+      router.push(`/quality-assessor/compare?ids=${selected.join(",")}`)
+    }
+  }
+
+  return (
+    <Card>
+      <CardContent className="p-4">
+        <div className="flex items-center justify-between mb-3">
+          <h3 className="text-sm font-bold text-foreground-strong flex items-center gap-2">
+            <GitCompare className="w-4 h-4 text-secondary" />
+            مقارنة التقييمات
+          </h3>
+          <span className="text-xs text-muted-foreground">
+            اختر تقييمين أو أكثر ({selected.length}/4)
+          </span>
+        </div>
+        
+        <div className="flex flex-wrap gap-2 mb-3">
+          {assessments.map(a => (
+            <button
+              key={a.id}
+              onClick={() => handleToggle(a.id)}
+              className={cn(
+                "px-3 py-1.5 rounded-md text-xs font-medium border transition-smooth",
+                selected.includes(a.id)
+                  ? "bg-secondary text-white border-secondary"
+                  : "bg-surface border-border text-muted-foreground hover:bg-surface-muted"
+              )}
+            >
+              {a.assessor?.name} - {a.school?.name}
+            </button>
+          ))}
+        </div>
+
+        {selected.length >= 2 && (
+          <Button onClick={handleCompare} size="sm" icon={<GitCompare className="w-4 h-4" />}>
+            مقارنة ({selected.length}) تقييمات
+          </Button>
+        )}
+      </CardContent>
+    </Card>
+  )
+}
+
+===== FILE: src\app\(dashboard)\quality-assessor\compare\print\page.tsx =====
+import { prisma } from "@/lib/prisma"
+import { getCurrentUser } from "@/lib/permissions"
+import { redirect } from "next/navigation"
+import { compareAssessments } from "@/features/quality-assessment/services/aggregation"
+import { PrintButton } from "@/components/reports/PrintButton"
+
+export default async function PrintComparisonPage({ searchParams }: { searchParams: { ids: string } }) {
+  const user = await getCurrentUser()
+  if (!user) redirect("/login")
+
+  const assessmentIds = searchParams.ids.split(",").filter(Boolean)
+  if (assessmentIds.length < 2) {
+    redirect("/quality-assessor")
+  }
+
+  // Authorization check
+  const assessments = await prisma.assessment.findMany({
+    where: { id: { in: assessmentIds } },
+    select: { schoolId: true, branchId: true }
+  })
+
+  if (user.role !== "SUPER_ADMIN") {
+    const hasUnauthorized = assessments.some(a => {
+      if (user.role === "SCHOOL_MANAGER") return a.schoolId !== user.schoolId
+      if (user.role === "BRANCH_MANAGER") return a.branchId !== user.branchId
+      return false
+    })
+    if (hasUnauthorized) redirect("/quality-assessor")
+  }
+
+  const result = await compareAssessments(assessmentIds)
+
+  return (
+    <div className="bg-white text-black p-8 md:p-12" dir="rtl">
+      <style>{`
+        @media print {
+          .no-print { display: none !important; }
+          table { page-break-inside: auto; }
+          tr { page-break-inside: avoid; page-break-after: auto; }
+          thead { display: table-header-group; }
+        }
+        @page { size: A4 landscape; margin: 10mm; }
+        .report-header { border-bottom: 3px solid #0C3740; padding-bottom: 16px; margin-bottom: 24px; }
+        .section-title { font-size: 16px; font-weight: 700; color: #0C3740; margin-top: 24px; margin-bottom: 12px; border-right: 4px solid #079FDF; padding-right: 8px; }
+        table { width: 100%; border-collapse: collapse; margin-bottom: 20px; font-size: 12px; }
+        th, td { border: 1px solid #ddd; padding: 6px 8px; text-align: right; }
+        th { background-color: #f4f6fb; color: #172B36; font-weight: 600; }
+        .text-success { color: #087a4d; font-weight: 600; }
+        .text-danger { color: #b42318; font-weight: 600; }
+        .text-warning { color: #9a6700; font-weight: 600; }
+        .text-muted { color: #667085; }
+        .metric-box { border: 1px solid #ddd; border-radius: 8px; padding: 12px; text-align: center; }
+        .metric-value { font-size: 24px; font-weight: 700; margin: 4px 0; }
+        .metric-label { font-size: 11px; color: #667085; }
+      `}</style>
+
+      <div className="no-print mb-8">
+        <PrintButton />
+      </div>
+
+      {/* Report Header */}
+      <div className="report-header">
+        <h1 className="text-2xl font-bold text-[#0C3740]">تقرير مقارنة التقييمات</h1>
+        <p className="text-sm text-gray-600 mt-1">
+          تاريخ التقرير: {new Date().toLocaleDateString('ar-SA')} | 
+          عدد التقييمات: {result.assessments.length}
+        </p>
+      </div>
+
+      {/* Evaluators Info */}
+      <div className="section-title">المُقيّمون المشمولون</div>
+      <table>
+        <thead>
+          <tr>
+            <th>الاسم</th>
+            <th>الدور</th>
+            <th>المدرسة</th>
+            <th>الفرع</th>
+            <th>الحالة</th>
+            <th>نسبة الإكمال</th>
+          </tr>
+        </thead>
+        <tbody>
+          {result.assessments.map(a => (
+            <tr key={a.id}>
+              <td>{a.assessorName}</td>
+              <td>
+                {a.assessorRole === "QUALITY_ASSESSOR" ? "مشرف" : 
+                 a.assessorRole === "SCHOOL_MANAGER" ? "مدير عام" : 
+                 a.assessorRole === "BRANCH_MANAGER" ? "مدير قسم" : a.assessorRole}
+              </td>
+              <td>{a.schoolName}</td>
+              <td>{a.branchName || "كامل المدرسة"}</td>
+              <td>{a.status === "COMPLETED" ? "مكتمل" : "جاري"}</td>
+              <td>{a.progress}%</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+
+      {/* Aggregated Metrics */}
+      <div className="section-title">النتائج المُجمّعة</div>
+      <div className="grid grid-cols-4 gap-3 mb-6">
+        <div className="metric-box">
+          <div className="metric-label">متوسط الأداء</div>
+          <div className="metric-value text-[#079FDF]">{result.aggregated.averageScore}%</div>
+          <div className="text-xs text-gray-500">{result.aggregated.performanceBand}</div>
+        </div>
+        <div className="metric-box">
+          <div className="metric-label">معدل الاتفاق</div>
+          <div className="metric-value text-success">{result.aggregated.agreementRate}%</div>
+        </div>
+        <div className="metric-box">
+          <div className="metric-label">مؤشرات متفق عليها</div>
+          <div className="metric-value text-success">{result.aggregated.agreedIndicators}</div>
+        </div>
+        <div className="metric-box">
+          <div className="metric-label">مؤشرات مختلف عليها</div>
+          <div className="metric-value text-danger">{result.aggregated.disagreedIndicators}</div>
+        </div>
+      </div>
+
+      {/* Domain Averages */}
+      <div className="section-title">متوسطات المجالات</div>
+      <table>
+        <thead>
+          <tr>
+            <th>المجال</th>
+            <th>نسبة الاتفاق</th>
+            <th>المستوى</th>
+          </tr>
+        </thead>
+        <tbody>
+          {result.aggregated.domainAverages.map(d => (
+            <tr key={d.domain}>
+              <td>{d.domain}</td>
+              <td>{d.average}%</td>
+              <td>{d.band}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+
+      {/* Detailed Comparison */}
+      <div className="section-title">المقارنة التفصيلية حسب المؤشر</div>
+      <table>
+        <thead>
+          <tr>
+            <th style={{ width: '8%' }}>الكود</th>
+            <th style={{ width: '30%' }}>المؤشر</th>
+            {result.assessments.map(a => (
+              <th key={a.id} style={{ width: `${60 / result.assessments.length}%` }}>
+                {a.assessorName}
+              </th>
+            ))}
+            <th style={{ width: '8%' }}>الحالة</th>
+          </tr>
+        </thead>
+        <tbody>
+          {result.comparisons.map(c => (
+            <tr key={c.indicatorCode}>
+              <td className="font-mono text-[#079FDF]">{c.indicatorCode}</td>
+              <td className="text-xs">{c.indicatorText}</td>
+              {result.assessments.map(a => {
+                const resp = c.responses[a.id]
+                return (
+                  <td key={a.id} className="text-xs">
+                    {resp ? (
+                      <span className={resp.value === "لم يُقيّم" ? "text-muted" : ""}>
+                        {resp.value}
+                      </span>
+                    ) : (
+                      <span className="text-muted">—</span>
+                    )}
+                  </td>
+                )
+              })}
+              <td className="text-center">
+                {!c.evaluatedByAll ? (
+                  <span className="text-warning">⚠</span>
+                ) : c.agreement ? (
+                  <span className="text-success">✓</span>
+                ) : (
+                  <span className="text-danger">✗</span>
+                )}
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+
+      {/* Legend */}
+      <div className="mt-6 text-xs text-gray-500">
+        <p><span className="text-success">✓</span> متفق عليها &nbsp;|&nbsp; 
+           <span className="text-danger">✗</span> مختلف عليها &nbsp;|&nbsp; 
+           <span className="text-warning">⚠</span> لم يُقيّم من الجميع</p>
+      </div>
+    </div>
+  )
+}
+
+===== FILE: src\app\(school-manager)\school-manager\quality\improvement-plans\[planId]\print\page.tsx =====
+import { prisma } from "@/lib/prisma"
+import { getCurrentUser } from "@/lib/permissions"
+import { redirect } from "next/navigation"
+import { PrintButton } from "@/components/reports/PrintButton"
+
+export default async function PrintPlanPage({ params }: { params: { planId: string } }) {
+  const user = await getCurrentUser()
+  if (!user) redirect("/login")
+
+  const plan = await prisma.improvementPlan.findUnique({
+    where: { id: params.planId },
+    include: { 
+      actions: true, 
+      school: true, 
+      branch: true, 
+      gap: { include: { indicator: true } } 
+    } as any
+  })
+
+  if (!plan) redirect("/")
+
+  const planData = plan as any
+  const indicatorCode = planData.indicator?.code || planData.gap?.indicator?.code || "غير محدد"
+
+  return (
+    <div className="bg-white text-black p-8 md:p-12" dir="rtl">
+      <style>{`
+        @media print { .no-print { display: none !important; } }
+        @page { size: A4; margin: 15mm; }
+        table { width: 100%; border-collapse: collapse; margin-bottom: 24px; font-size: 13px; }
+        th, td { border: 1px solid #ddd; padding: 8px; text-align: right; }
+        th { background-color: #f4f6fb; }
+        .section-title { font-size: 18px; font-weight: 700; color: #0C3740; margin-top: 24px; margin-bottom: 12px; border-right: 4px solid #079FDF; padding-right: 8px; }
+      `}</style>
+
+      <div className="no-print mb-8">
+        <PrintButton />
+      </div>
+
+      <h1 className="text-2xl font-bold text-[#0C3740] mb-2">{planData.title}</h1>
+      <p className="text-sm text-gray-600 mb-6">{planData.school.name} - {planData.branch?.name || "كامل المدرسة"}</p>
+
+      <div className="section-title">تفاصيل الخطة</div>
+      <table>
+        <tbody>
+          <tr><th>المؤشر المستهدف</th><td>{indicatorCode}</td></tr>
+          <tr><th>تاريخ البدء</th><td>{new Date(planData.startDate).toLocaleDateString('ar-SA')}</td></tr>
+          <tr><th>تاريخ الانتهاء</th><td>{new Date(planData.targetDate).toLocaleDateString('ar-SA')}</td></tr>
+          <tr><th>الحالة</th><td>{planData.status === 'COMPLETED' ? 'مكتملة' : planData.status === 'ACTIVE' ? 'جارية' : 'مسودة'}</td></tr>
+        </tbody>
+      </table>
+
+      <div className="section-title">تحليل الأداء</div>
+      <p><strong>الأسباب:</strong> {planData.reasons || "غير محدد"}</p>
+      <p><strong>نقاط القوة:</strong> {planData.strengths || "غير محدد"}</p>
+      <p><strong>جوانب التحسين:</strong> {planData.improvements || "غير محدد"}</p>
+
+      <div className="section-title">مؤشرات النجاح</div>
+      <table>
+        <thead><tr><th>الأساسي</th><th>المستهدف</th><th>المقاس حالياً</th></tr></thead>
+        <tbody>
+          <tr>
+            <td>{planData.baseline || 0}%</td>
+            <td>{planData.targetPercentage || 0}%</td>
+            <td>{planData.currentMeasured || 0}%</td>
+          </tr>
+        </tbody>
+      </table>
+
+      <div className="section-title">إجراءات التحسين</div>
+      <table>
+        <thead>
+          <tr>
+            <th>الإجراء</th>
+            <th>تاريخ البدء</th>
+            <th>تاريخ الانتهاء</th>
+            <th>الحالة</th>
+          </tr>
+        </thead>
+        <tbody>
+          {planData.actions.map((a: any) => (
+            <tr key={a.id}>
+              <td>{a.title}</td>
+              <td>{a.startDate ? new Date(a.startDate).toLocaleDateString('ar-SA') : "-"}</td>
+              <td>{a.dueDate ? new Date(a.dueDate).toLocaleDateString('ar-SA') : "-"}</td>
+              <td>
+                {a.status === 'COMPLETED' ? 'مكتملة' : 
+                 a.status === 'IN_PROGRESS' ? 'جارية' : 
+                 a.status === 'DELAYED' ? 'متعثرة' : 'لم يبدأ'}
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  )
+}
+
+===== FILE: src\app\(school-manager)\school-manager\reports\page.tsx =====
+import { prisma } from "@/lib/prisma"
+import { getCurrentUser } from "@/lib/permissions"
+import { PageHeader } from "@/components/layout/PageHeader"
+import { Card, CardHeader, CardTitle, CardContent, CardDescription } from "@/components/ui/Card"
+import { Button } from "@/components/ui/Button"
+import { Badge } from "@/components/ui/Badge"
+import { StatCard } from "@/components/dashboard/StatCard"
+import { FileText, Download, ClipboardCheck, AlertTriangle, CheckCircle, TrendingUp } from "lucide-react"
+import { formatDate } from "@/lib/utils"
+
+export default async function ReportsPage() {
+  const user = await getCurrentUser()
+  if (!user?.schoolId) return null
+
+  const [assessments, gaps, plans, branches] = await Promise.all([
+    prisma.assessment.count({ where: { schoolId: user.schoolId } }),
+    prisma.gap.count({ where: { schoolId: user.schoolId } }),
+    prisma.improvementPlan.count({ where: { schoolId: user.schoolId } }),
+    prisma.branch.count({ where: { schoolId: user.schoolId } }),
+  ])
+
+  const reports = [
+    {
+      title: "تقرير الجودة الشامل",
+      desc: "نظرة شاملة على أداء المدرسة في جميع المجالات والفروع",
+      icon: <FileText className="w-5 h-5" />,
+      available: assessments > 0,
+      tone: "info" as const,
+    },
+    {
+      title: "ملخص التقييمات",
+      desc: `حالة ${assessments} تقييم — المكتملة والجارية`,
+      icon: <ClipboardCheck className="w-5 h-5" />,
+      available: assessments > 0,
+      tone: "amber" as const,
+    },
+    {
+      title: "ملخص الفجوات",
+      desc: `${gaps} فجوة مسجلة — المفتوحة والمغلقة`,
+      icon: <AlertTriangle className="w-5 h-5" />,
+      available: gaps > 0,
+      tone: "danger" as const,
+    },
+    {
+      title: "تقدم التحسين",
+      desc: `أداء ${plans} خطة تحسين نشطة`,
+      icon: <TrendingUp className="w-5 h-5" />,
+      available: plans > 0,
+      tone: "success" as const,
+    },
+  ]
+
+  return (
+    <div className="space-y-6">
+      <PageHeader
+        title="التقارير"
+        description="تقارير تنفيذية حول أداء المدرسة وجودتها"
+        breadcrumbs={[{ label: "الرئيسية", href: "/school-manager" }, { label: "التقارير" }]}
+      />
+
+      {/* Summary KPIs */}
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+        <StatCard label="التقييمات" value={assessments} icon={<ClipboardCheck className="w-5 h-5" />} tone="amber" />
+        <StatCard label="الفجوات" value={gaps} icon={<AlertTriangle className="w-5 h-5" />} tone="danger" />
+        <StatCard label="خطط التحسين" value={plans} icon={<TrendingUp className="w-5 h-5" />} tone="success" />
+        <StatCard label="الفروع" value={branches} icon={<CheckCircle className="w-5 h-5" />} tone="info" />
+      </div>
+
+      {/* Report cards */}
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4 lg:gap-6">
+        {reports.map(report => (
+          <Card key={report.title} variant="primary" className="shadow-card-hover">
+            <CardContent className="p-5 lg:p-6">
+              <div className="flex items-start justify-between mb-4">
+                <div className={`w-10 h-10 rounded-lg flex items-center justify-center ${report.tone === 'info' ? 'tint-info' : report.tone === 'amber' ? 'tint-amber' : report.tone === 'danger' ? 'tint-danger' : 'tint-success'}`}>
+                  {report.icon}
+                </div>
+                <Badge variant={report.available ? "success" : "neutral"}>
+                  {report.available ? "متاح" : "لا توجد بيانات"}
+                </Badge>
+              </div>
+              <h3 className="text-sm font-semibold text-foreground-strong">{report.title}</h3>
+              <p className="text-[13px] text-muted-foreground mt-1">{report.desc}</p>
+              <div className="mt-4 pt-4 border-t border-border">
+                <Button variant="outline" size="sm" icon={<Download className="w-3.5 h-3.5" />} disabled={!report.available}>
+                  {report.available ? "تحميل التقرير" : "غير متاح"}
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
+        ))}
+      </div>
+    </div>
+  )
+}
+
+===== FILE: src\components\reports\PrintButton.tsx =====
+"use client"
+
+export function PrintButton() {
+  return (
+    <button 
+      onClick={() => window.print()} 
+      className="px-4 py-2 bg-primary text-white rounded-md no-print mb-8"
+    >
+      طباعة / حفظ كـ PDF
+    </button>
+  )
+}
+
+===== SEARCH A: access control call sites =====
+src\app\page.tsx:2: import { getCurrentUser } from "@/lib/permissions"
+src\app\page.tsx:11: const user = await getCurrentUser()
+src\app\(dashboard)\layout.tsx:4: import { getCurrentUser } from "@/lib/permissions"
+src\app\(dashboard)\layout.tsx:8: const user = await getCurrentUser()
+src\app\(dashboard)\activity\page.tsx:49: searchParams,
+src\app\(dashboard)\activity\page.tsx:51: searchParams: { [key: string]: string | string[] | undefined }
+src\app\(dashboard)\activity\page.tsx:55: const q = typeof searchParams.q === 'string' ? searchParams.q : undefined
+src\app\(dashboard)\activity\page.tsx:56: const entityType = typeof searchParams.entityType === 'string' ? searchParams.entityType : undefined
+src\app\(dashboard)\activity\page.tsx:57: const page = parseInt(typeof searchParams.page === 'string' ? searchParams.page : '1') || 1
+src\app\(dashboard)\activity\page.tsx:84: const params = new URLSearchParams()
+src\app\(dashboard)\ai-assistant\page.tsx:1: import { getCurrentUser } from "@/lib/permissions"
+src\app\(dashboard)\ai-assistant\page.tsx:7: const user = await getCurrentUser()
+src\app\(dashboard)\dashboard\page.tsx:2: import { getCurrentUser } from "@/lib/permissions"
+src\app\(dashboard)\dashboard\page.tsx:13: const user = await getCurrentUser()
+src\app\(dashboard)\evidence\page.tsx:2: import { getCurrentUser } from "@/lib/permissions"
+src\app\(dashboard)\evidence\page.tsx:50: searchParams,
+src\app\(dashboard)\evidence\page.tsx:52: searchParams: { [key: string]: string | string[] | undefined }
+src\app\(dashboard)\evidence\page.tsx:54: const user = await getCurrentUser()
+src\app\(dashboard)\evidence\page.tsx:57: const q = typeof searchParams.q === 'string' ? searchParams.q : undefined
+src\app\(dashboard)\evidence\page.tsx:58: const tool = typeof searchParams.tool === 'string' ? searchParams.tool : undefined
+src\app\(dashboard)\follow-up\page.tsx:2: import { getCurrentUser } from "@/lib/permissions"
+src\app\(dashboard)\follow-up\page.tsx:15: const user = await getCurrentUser()
+src\app\(dashboard)\gaps\page.tsx:2: import { getCurrentUser } from "@/lib/permissions"
+src\app\(dashboard)\gaps\page.tsx:13: searchParams,
+src\app\(dashboard)\gaps\page.tsx:15: searchParams: { [key: string]: string | string[] | undefined }
+src\app\(dashboard)\gaps\page.tsx:17: const user = await getCurrentUser()
+src\app\(dashboard)\gaps\page.tsx:20: const q = typeof searchParams.q === 'string' ? searchParams.q : undefined
+src\app\(dashboard)\gaps\page.tsx:21: const schoolId = typeof searchParams.schoolId === 'string' ? searchParams.schoolId : undefined
+src\app\(dashboard)\improvement-plans\page.tsx:2: import { getCurrentUser } from "@/lib/permissions"
+src\app\(dashboard)\improvement-plans\page.tsx:13: const user = await getCurrentUser()
+src\app\(dashboard)\improvement-plans\[planId]\page.tsx:2: import { getCurrentUser } from "@/lib/permissions"
+src\app\(dashboard)\improvement-plans\[planId]\page.tsx:12: const user = await getCurrentUser()
+src\app\(dashboard)\initiative\page.tsx:2: import { getCurrentUser } from "@/lib/permissions"
+src\app\(dashboard)\initiative\page.tsx:9: const user = await getCurrentUser()
+src\app\(dashboard)\private-review\actions.ts:4: import { getCurrentUser } from "@/lib/permissions"
+src\app\(dashboard)\private-review\actions.ts:8: const user = await getCurrentUser()
+src\app\(dashboard)\private-review\page.tsx:2: import { getCurrentUser } from "@/lib/permissions"
+src\app\(dashboard)\private-review\page.tsx:14: const user = await getCurrentUser()
+src\app\(dashboard)\private-review\new\actions.ts:4: import { getCurrentUser } from "@/lib/permissions"
+src\app\(dashboard)\private-review\new\actions.ts:8: const user = await getCurrentUser()
+src\app\(dashboard)\private-review\new\page.tsx:2: import { getCurrentUser } from "@/lib/permissions"
+src\app\(dashboard)\private-review\new\page.tsx:11: const user = await getCurrentUser()
+src\app\(dashboard)\quality-assessor\page.tsx:2: import { getCurrentUser, getAuthorizedBranchIds } from "@/lib/permissions"
+src\app\(dashboard)\quality-assessor\page.tsx:15: const user = await getCurrentUser()
+src\app\(dashboard)\quality-assessor\page.tsx:32: const authorizedBranchIds = await getAuthorizedBranchIds(user)
+src\app\(dashboard)\quality-assessor\assessments\[assessmentId]\page.tsx:2: import { getCurrentUser, assertAssessmentAccess } from "@/lib/permissions"
+src\app\(dashboard)\quality-assessor\assessments\[assessmentId]\page.tsx:10: const user = await getCurrentUser()
+src\app\(dashboard)\quality-assessor\assessments\[assessmentId]\page.tsx:31: const allowed = await assertAssessmentAccess(user, assessment, "read")
+src\app\(dashboard)\quality-assessor\compare\page.tsx:2: import { getCurrentUser, checkAssessmentAccess } from "@/lib/permissions"
+src\app\(dashboard)\quality-assessor\compare\page.tsx:11: export default async function ComparePage({ searchParams }: { searchParams: { ids: string } }) {
+src\app\(dashboard)\quality-assessor\compare\page.tsx:12: const user = await getCurrentUser()
+src\app\(dashboard)\quality-assessor\compare\page.tsx:15: const assessmentIds = searchParams.ids.split(",").filter(Boolean)
+src\app\(dashboard)\quality-assessor\compare\page.tsx:23: const access = await checkAssessmentAccess(id, "read")
+src\app\(dashboard)\quality-assessor\compare\page.tsx:42: <a href={`/quality-assessor/compare/print?ids=${searchParams.ids}`} target="_blank">
+src\app\(dashboard)\quality-assessor\compare\print\page.tsx:2: import { getCurrentUser } from "@/lib/permissions"
+src\app\(dashboard)\quality-assessor\compare\print\page.tsx:7: export default async function PrintComparisonPage({ searchParams }: { searchParams: { ids: string } }) {
+src\app\(dashboard)\quality-assessor\compare\print\page.tsx:8: const user = await getCurrentUser()
+src\app\(dashboard)\quality-assessor\compare\print\page.tsx:11: const assessmentIds = searchParams.ids.split(",").filter(Boolean)
+src\app\(dashboard)\reports\page.tsx:2: import { getCurrentUser } from "@/lib/permissions"
+src\app\(dashboard)\reports\page.tsx:161: searchParams
+src\app\(dashboard)\reports\page.tsx:163: searchParams: { [key: string]: string | string[] | undefined }
+src\app\(dashboard)\reports\page.tsx:165: const user = await getCurrentUser()
+src\app\(dashboard)\reports\compare\page.tsx:2: import { getCurrentUser } from "@/lib/permissions"
+src\app\(dashboard)\reports\compare\page.tsx:12: export default async function EvaluatorComparisonPage({ searchParams }: { searchParams: { branchId?: string, schoolId?: string } }) {
+src\app\(dashboard)\reports\compare\page.tsx:13: const user = await getCurrentUser()
+src\app\(dashboard)\reports\compare\page.tsx:16: let branchId = searchParams.branchId
+src\app\(dashboard)\reports\print\page.tsx:2: import { getCurrentUser } from "@/lib/permissions"
+src\app\(dashboard)\reports\print\page.tsx:8: export default async function PrintReportPage({ searchParams }: { searchParams: { scope: string, schoolId?: string, branchId?: string } }) {
+src\app\(dashboard)\reports\print\page.tsx:9: const user = await getCurrentUser()
+src\app\(dashboard)\reports\print\page.tsx:12: const isAllSchools = searchParams.scope === "all"
+src\app\(dashboard)\reports\print\page.tsx:13: const branchId = searchParams.branchId
+src\app\(dashboard)\reports\print\page.tsx:21: where: isAllSchools ? {} : { id: searchParams.schoolId },
+src\app\(dashboard)\schools\actions.ts:4: import { getCurrentUser } from "@/lib/permissions"
+src\app\(dashboard)\schools\actions.ts:9: const user = await getCurrentUser()
+src\app\(dashboard)\schools\page.tsx:22: searchParams,
+src\app\(dashboard)\schools\page.tsx:24: searchParams: { [key: string]: string | string[] | undefined }
+src\app\(dashboard)\schools\page.tsx:28: const q = typeof searchParams.q === 'string' ? searchParams.q : undefined
+src\app\(dashboard)\schools\page.tsx:29: const status = typeof searchParams.status === 'string' ? searchParams.status : undefined
+src\app\(dashboard)\schools\page.tsx:30: const page = parseInt(typeof searchParams.page === 'string' ? searchParams.page : '1') || 1
+src\app\(dashboard)\schools\page.tsx:57: const params = new URLSearchParams()
+src\app\(dashboard)\schools\add\page.tsx:1: import { getCurrentUser } from "@/lib/permissions"
+src\app\(dashboard)\schools\add\page.tsx:8: const user = await getCurrentUser()
+src\app\(dashboard)\settings\actions.ts:4: import { getCurrentUser } from "@/lib/permissions"
+src\app\(dashboard)\settings\actions.ts:9: const user = await getCurrentUser()
+src\app\(dashboard)\settings\actions.ts:33: const user = await getCurrentUser()
+src\app\(dashboard)\settings\actions.ts:53: const user = await getCurrentUser()
+src\app\(dashboard)\settings\page.tsx:2: import { getCurrentUser } from "@/lib/permissions"
+src\app\(dashboard)\settings\page.tsx:17: const user = await getCurrentUser()
+src\app\(dashboard)\surveys\page.tsx:2: import { getCurrentUser } from "@/lib/permissions"
+src\app\(dashboard)\surveys\page.tsx:19: const user = await getCurrentUser()
+src\app\(dashboard)\users\page.tsx:27: searchParams,
+src\app\(dashboard)\users\page.tsx:29: searchParams: { [key: string]: string | string[] | undefined }
+src\app\(dashboard)\users\page.tsx:33: const q = typeof searchParams.q === 'string' ? searchParams.q : undefined
+src\app\(dashboard)\users\page.tsx:34: const role = typeof searchParams.role === 'string' ? searchParams.role : undefined
+src\app\(dashboard)\users\page.tsx:35: const status = typeof searchParams.status === 'string' ? searchParams.status : undefined
+src\app\(dashboard)\users\page.tsx:36: const page = parseInt(typeof searchParams.page === 'string' ? searchParams.page : '1') || 1
+src\app\(dashboard)\users\page.tsx:74: const params = new URLSearchParams()
+src\app\(school-manager)\layout.tsx:2: import { getCurrentUser } from "@/lib/permissions"
+src\app\(school-manager)\layout.tsx:6: const user = await getCurrentUser()
+src\app\(school-manager)\school-manager\page.tsx:2: import { getCurrentUser } from "@/lib/permissions"
+src\app\(school-manager)\school-manager\page.tsx:18: const user = await getCurrentUser()
+src\app\(school-manager)\school-manager\activity\page.tsx:2: import { getCurrentUser } from "@/lib/permissions"
+src\app\(school-manager)\school-manager\activity\page.tsx:34: const user = await getCurrentUser()
+src\app\(school-manager)\school-manager\branch-profile\actions.ts:4: import { getCurrentUser } from "@/lib/permissions"
+src\app\(school-manager)\school-manager\branch-profile\actions.ts:8: const user = await getCurrentUser()
+src\app\(school-manager)\school-manager\branch-profile\page.tsx:2: import { getCurrentUser } from "@/lib/permissions"
+src\app\(school-manager)\school-manager\branch-profile\page.tsx:12: const user = await getCurrentUser()
+src\app\(school-manager)\school-manager\branches\actions.ts:4: import { getCurrentUser } from "@/lib/permissions"
+src\app\(school-manager)\school-manager\branches\actions.ts:9: const user = await getCurrentUser()
+src\app\(school-manager)\school-manager\branches\page.tsx:2: import { getCurrentUser } from "@/lib/permissions"
+src\app\(school-manager)\school-manager\branches\page.tsx:13: const user = await getCurrentUser()
+src\app\(school-manager)\school-manager\branches\add\page.tsx:1: import { getCurrentUser } from "@/lib/permissions"
+src\app\(school-manager)\school-manager\branches\add\page.tsx:11: const user = await getCurrentUser()
+src\app\(school-manager)\school-manager\branches\[branchId]\page.tsx:2: import { getCurrentUser } from "@/lib/permissions"
+src\app\(school-manager)\school-manager\branches\[branchId]\page.tsx:14: const user = await getCurrentUser()
+src\app\(school-manager)\school-manager\quality\page.tsx:2: import { getCurrentUser } from "@/lib/permissions"
+src\app\(school-manager)\school-manager\quality\page.tsx:14: const user = await getCurrentUser()
+src\app\(school-manager)\school-manager\quality\assessments\page.tsx:2: import { getCurrentUser } from "@/lib/permissions"
+src\app\(school-manager)\school-manager\quality\assessments\page.tsx:13: const user = await getCurrentUser()
+src\app\(school-manager)\school-manager\quality\gaps\page.tsx:2: import { getCurrentUser } from "@/lib/permissions"
+src\app\(school-manager)\school-manager\quality\gaps\page.tsx:12: const user = await getCurrentUser()
+src\app\(school-manager)\school-manager\quality\improvement-plans\page.tsx:2: import { getCurrentUser } from "@/lib/permissions"
+src\app\(school-manager)\school-manager\quality\improvement-plans\page.tsx:14: const user = await getCurrentUser()
+src\app\(school-manager)\school-manager\quality\improvement-plans\new\page.tsx:2: import { getCurrentUser } from "@/lib/permissions"
+src\app\(school-manager)\school-manager\quality\improvement-plans\new\page.tsx:8: export default async function NewPlanPage({ searchParams }: { searchParams: { gapId?: string } }) {
+src\app\(school-manager)\school-manager\quality\improvement-plans\new\page.tsx:9: const user = await getCurrentUser()
+src\app\(school-manager)\school-manager\quality\improvement-plans\new\page.tsx:13: if (searchParams.gapId) {
+src\app\(school-manager)\school-manager\quality\improvement-plans\new\page.tsx:15: where: { id: searchParams.gapId },
+src\app\(school-manager)\school-manager\quality\improvement-plans\[planId]\page.tsx:2: import { getCurrentUser } from "@/lib/permissions"
+src\app\(school-manager)\school-manager\quality\improvement-plans\[planId]\page.tsx:15: const user = await getCurrentUser()
+src\app\(school-manager)\school-manager\quality\improvement-plans\[planId]\edit\page.tsx:2: import { getCurrentUser } from "@/lib/permissions"
+src\app\(school-manager)\school-manager\quality\improvement-plans\[planId]\edit\page.tsx:9: const user = await getCurrentUser()
+src\app\(school-manager)\school-manager\quality\improvement-plans\[planId]\print\page.tsx:2: import { getCurrentUser } from "@/lib/permissions"
+src\app\(school-manager)\school-manager\quality\improvement-plans\[planId]\print\page.tsx:7: const user = await getCurrentUser()
+src\app\(school-manager)\school-manager\reports\page.tsx:2: import { getCurrentUser } from "@/lib/permissions"
+src\app\(school-manager)\school-manager\reports\page.tsx:12: const user = await getCurrentUser()
+src\app\(school-manager)\school-manager\settings\page.tsx:1: import { getCurrentUser } from "@/lib/permissions"
+src\app\(school-manager)\school-manager\settings\page.tsx:13: const user = await getCurrentUser()
+src\app\(school-manager)\school-manager\users\actions.ts:4: import { getCurrentUser } from "@/lib/permissions"
+src\app\(school-manager)\school-manager\users\actions.ts:9: const user = await getCurrentUser()
+src\app\(school-manager)\school-manager\users\actions.ts:158: const user = await getCurrentUser()
+src\app\(school-manager)\school-manager\users\page.tsx:2: import { getCurrentUser } from "@/lib/permissions"
+src\app\(school-manager)\school-manager\users\page.tsx:28: searchParams,
+src\app\(school-manager)\school-manager\users\page.tsx:30: searchParams: { [key: string]: string | string[] | undefined }
+src\app\(school-manager)\school-manager\users\page.tsx:32: const user = await getCurrentUser()
+src\app\(school-manager)\school-manager\users\page.tsx:48: const q = typeof searchParams.q === 'string' ? searchParams.q : undefined
+src\app\(school-manager)\school-manager\users\page.tsx:49: const role = typeof searchParams.role === 'string' ? searchParams.role : undefined
+src\app\(school-manager)\school-manager\users\page.tsx:50: const status = typeof searchParams.status === 'string' ? searchParams.status : undefined
+src\app\(school-manager)\school-manager\users\page.tsx:51: const page = parseInt(typeof searchParams.page === 'string' ? searchParams.page : '1') || 1
+src\app\(school-manager)\school-manager\users\page.tsx:82: const params = new URLSearchParams()
+src\app\(school-manager)\school-manager\users\add\page.tsx:12: export default function AddUserPage({ searchParams }: { searchParams: { role?: string } }) {
+src\app\(school-manager)\school-manager\users\add\page.tsx:18: const userRole = searchParams.role === "BRANCH_MANAGER" ? "BRANCH_MANAGER" : "SCHOOL_MANAGER"
+src\app\(school-manager)\school-manager\users\[userId]\page.tsx:3: import { getCurrentUser, getAuthorizedBranchIds } from "@/lib/permissions"
+src\app\(school-manager)\school-manager\users\[userId]\page.tsx:40: const user = await getCurrentUser()
+src\app\(school-manager)\school-manager\users\[userId]\page.tsx:58: const authorizedBranchIds = await getAuthorizedBranchIds(user)
+src\app\quality\assessments\[assessmentId]\results\page.tsx:2: import { getCurrentUser, assertAssessmentAccess } from "@/lib/permissions"
+src\app\quality\assessments\[assessmentId]\results\page.tsx:16: const user = await getCurrentUser()
+src\app\quality\assessments\[assessmentId]\results\page.tsx:34: const allowed = await assertAssessmentAccess(user, assessment, "read")
+src\features\admin\actions.ts:4: import { getCurrentUser, getAuthorizedBranchIds } from "@/lib/permissions"
+src\features\admin\actions.ts:10: const user = await getCurrentUser()
+src\features\admin\actions.ts:159: const currentUser = await getCurrentUser()
+src\features\admin\actions.ts:227: const user = await getCurrentUser()
+src\features\admin\actions.ts:252: const user = await getCurrentUser()
+src\features\admin\actions.ts:261: const authorizedBranchIds = await getAuthorizedBranchIds(user)
+src\features\admin\actions.ts:282: const currentUser = await getCurrentUser()
+src\features\admin\actions.ts:333: const authorizedBranchIds = await getAuthorizedBranchIds(currentUser)
+src\features\admin\actions.ts:363: const currentUser = await getCurrentUser()
+src\features\ai-assistant\actions.ts:6: import { getCurrentUser } from "@/lib/permissions"
+src\features\ai-assistant\actions.ts:14: const user = await getCurrentUser()
+src\features\ai-assistant\services\context.ts:2: import { getCurrentUser } from "@/lib/permissions"
+src\features\ai-assistant\services\context.ts:5: const user = await getCurrentUser()
+src\features\improvement-plans\actions.ts:4: import { getCurrentUser } from "@/lib/permissions"
+src\features\improvement-plans\actions.ts:8: const user = await getCurrentUser()
+src\features\improvement-plans\actions.ts:115: const user = await getCurrentUser()
+src\features\improvement-plans\actions.ts:136: const user = await getCurrentUser()
+src\features\improvement-plans\actions.ts:184: const user = await getCurrentUser()
+src\features\initiatives\actions.ts:4: import { getCurrentUser } from "@/lib/permissions"
+src\features\initiatives\actions.ts:8: const user = await getCurrentUser()
+src\features\landing\actions.ts:4: import { getCurrentUser } from "@/lib/permissions"
+src\features\landing\actions.ts:30: const user = await getCurrentUser()
+src\features\quality-assessment\actions.ts:4: import { getCurrentUser, checkAssessmentAccess } from "@/lib/permissions"
+src\features\quality-assessment\actions.ts:9: const user = await getCurrentUser()
+src\features\quality-assessment\actions.ts:78: const user = await getCurrentUser()
+src\features\quality-assessment\actions.ts:171: const user = await getCurrentUser()
+src\features\quality-assessment\actions.ts:175: const access = await checkAssessmentAccess(assessmentId, "write")
+src\features\quality-assessment\actions.ts:198: const user = await getCurrentUser()
+src\features\quality-assessment\actions.ts:209: const access = await checkAssessmentAccess(assessmentId, "write")
+src\features\quality-assessment\actions.ts:220: const user = await getCurrentUser()
+src\features\quality-assessment\actions\gaps.ts:4: import { getCurrentUser, checkAssessmentAccess, getAuthorizedBranchIds } from "@/lib/permissions"
+src\features\quality-assessment\actions\gaps.ts:11: const user = await getCurrentUser()
+src\features\quality-assessment\actions\gaps.ts:15: const access = await checkAssessmentAccess(assessmentId, "write")
+src\features\quality-assessment\actions\gaps.ts:26: const user = await getCurrentUser()
+src\features\quality-assessment\actions\gaps.ts:30: const access = await checkAssessmentAccess(assessmentId, "write")
+src\features\quality-assessment\actions\gaps.ts:49: const user = await getCurrentUser()
+src\features\quality-assessment\actions\gaps.ts:54: const access = await checkAssessmentAccess(assessmentId, "write")
+src\features\quality-assessment\actions\gaps.ts:73: const user = await getCurrentUser()
+src\features\quality-assessment\actions\gaps.ts:108: const authorizedBranchIds = await getAuthorizedBranchIds(user)
+src\features\quality-assessment\services\aggregation.ts:2: import { getCurrentUser, checkAssessmentAccess } from "@/lib/permissions"
+src\features\quality-assessment\services\aggregation.ts:28: const currentUser = await getCurrentUser()
+src\features\quality-assessment\services\aggregation.ts:32: const access = await checkAssessmentAccess(id, "read")
+src\features\quality-assessment\services\analysis.ts:2: import { getCurrentUser, getAuthorizedBranchIds } from "@/lib/permissions"
+src\features\quality-assessment\services\analysis.ts:39: const user = await getCurrentUser()
+src\features\quality-assessment\services\analysis.ts:71: const user = await getCurrentUser()
+src\features\quality-assessment\services\analysis.ts:166: const user = await getCurrentUser()
+src\features\quality-assessment\services\analysis.ts:177: const authorizedBranchIds = await getAuthorizedBranchIds(user)
+src\features\quality-reports\services\analytics.ts:2: import { getCurrentUser } from "@/lib/permissions"
+src\features\quality-reports\services\analytics.ts:41: const user = await getCurrentUser()
+src\features\search\actions.ts:4: import { getCurrentUser, getAuthorizedBranchIds } from "@/lib/permissions"
+src\features\search\actions.ts:7: const user = await getCurrentUser()
+src\features\search\actions.ts:42: const authorizedBranchIds = await getAuthorizedBranchIds(user)
+src\features\settings\actions.ts:4: import { getCurrentUser } from "@/lib/permissions"
+src\features\settings\actions.ts:9: const user = await getCurrentUser()
+src\features\settings\actions.ts:49: const user = await getCurrentUser()
+src\lib\auth.ts:7: export const { handlers, auth, signIn, signOut } = NextAuth({
+src\lib\permissions.ts:5: export async function getCurrentUser() {
+src\lib\permissions.ts:6: const session = await auth()
+src\lib\permissions.ts:18: const user = await getCurrentUser()
+src\lib\permissions.ts:26: const user = await getCurrentUser()
+src\lib\permissions.ts:43: export async function getAuthorizedBranchIds(
+src\lib\permissions.ts:59: export async function requireBranchAccess(branchId: string) {
+src\lib\permissions.ts:60: const user = await getCurrentUser()
+src\lib\permissions.ts:73: const authorizedBranchIds = await getAuthorizedBranchIds(user)
+src\lib\permissions.ts:90: export type CurrentUser = NonNullable<Awaited<ReturnType<typeof getCurrentUser>>>
+src\lib\permissions.ts:103: export async function assertAssessmentAccess(
+src\lib\permissions.ts:131: const authorizedBranchIds = await getAuthorizedBranchIds(user)
+src\lib\permissions.ts:145: export async function checkAssessmentAccess(
+src\lib\permissions.ts:149: const user = await getCurrentUser()
+src\lib\permissions.ts:158: const allowed = await assertAssessmentAccess(user, assessment, mode)
+
+===== SEARCH B: report and calculation wiring =====
+src\app\(dashboard)\dashboard\page.tsx:9: import { getPerformanceLevel } from "@/lib/performance"
+src\app\(dashboard)\dashboard\page.tsx:67: const level = getPerformanceLevel(pct)
+src\app\(dashboard)\gaps\page.tsx:210: scopeWhere.assessment = { assessorId: user.id, type: "NORMAL" }
+src\app\(dashboard)\private-review\actions.ts:18: assessorId: user.id,
+src\app\(dashboard)\private-review\page.tsx:18: where: { type: "PRIVATE_REVIEW", assessorId: user.id },
+src\app\(dashboard)\private-review\new\actions.ts:18: assessorId: user.id,
+src\app\(dashboard)\quality\page.tsx:1: import { getPlatformAnalytics } from "@/features/quality-reports/services/analytics"
+src\app\(dashboard)\quality\page.tsx:11: const data = await getPlatformAnalytics()
+src\app\(dashboard)\quality-assessor\page.tsx:33: assessorWhere.OR = [{ branchId: { in: authorizedBranchIds } }, { assessorId: user.id }]
+src\app\(dashboard)\quality-assessor\page.tsx:35: assessorWhere.assessorId = user.id
+src\app\(dashboard)\quality-assessor\assessments\[assessmentId]\page.tsx:16: const assessment = await prisma.assessment.findUnique({
+src\app\(dashboard)\quality-assessor\compare\page.tsx:9: import { compareAssessments } from "@/features/quality-assessment/services/aggregation"
+src\app\(dashboard)\quality-assessor\compare\page.tsx:29: const result = await compareAssessments(assessmentIds)
+src\app\(dashboard)\quality-assessor\compare\print\page.tsx:4: import { compareAssessments } from "@/features/quality-assessment/services/aggregation"
+src\app\(dashboard)\quality-assessor\compare\print\page.tsx:31: const result = await compareAssessments(assessmentIds)
+src\app\(dashboard)\reports\page.tsx:11: import { getPerformanceBand } from "@/features/quality-assessment/services/analysis"
+src\app\(dashboard)\reports\page.tsx:43: assessorId: a.assessor?.id ?? "unknown",
+src\app\(dashboard)\reports\page.tsx:59: if (!evaluatorMap.has(s.assessorId)) {
+src\app\(dashboard)\reports\page.tsx:60: evaluatorMap.set(s.assessorId, {
+src\app\(dashboard)\reports\page.tsx:61: id: s.assessorId,
+src\app\(dashboard)\reports\page.tsx:68: const ev = evaluatorMap.get(s.assessorId)
+src\app\(dashboard)\reports\page.tsx:80: band: getPerformanceBand(avgScore),
+src\app\(dashboard)\reports\page.tsx:117: assessorId: a.assessor?.id ?? "unknown",
+src\app\(dashboard)\reports\page.tsx:132: if (!evaluatorMap.has(s.assessorId)) {
+src\app\(dashboard)\reports\page.tsx:133: evaluatorMap.set(s.assessorId, {
+src\app\(dashboard)\reports\page.tsx:134: id: s.assessorId,
+src\app\(dashboard)\reports\page.tsx:141: const ev = evaluatorMap.get(s.assessorId)
+src\app\(dashboard)\reports\page.tsx:153: band: getPerformanceBand(avgScore),
+src\app\(dashboard)\reports\page.tsx:380: {getPerformanceBand(ev.averageScore)}
+src\app\(dashboard)\reports\page.tsx:405: {getPerformanceBand(ev.averageScore)}
+src\app\(dashboard)\reports\page.tsx:542: {getPerformanceBand(ev.averageScore)}
+src\app\(dashboard)\reports\page.tsx:562: {getPerformanceBand(ev.averageScore)}
+src\app\(dashboard)\reports\page.tsx:611: assessorId: user.id,
+src\app\(dashboard)\reports\page.tsx:637: const band = getPerformanceBand(avgScore)
+src\app\(dashboard)\reports\compare\page.tsx:9: import { getBranchAnalytics, EvaluatorAnalytics, AssessmentScore } from "@/features/quality-reports/services/analytics"
+src\app\(dashboard)\reports\compare\page.tsx:10: import { getPerformanceBand } from "@/features/quality-assessment/services/analysis"
+src\app\(dashboard)\reports\compare\page.tsx:30: const analytics = await getBranchAnalytics(branchId)
+src\app\(dashboard)\reports\compare\page.tsx:40: include: { assessment: { select: { assessorId: true } } }
+src\app\(dashboard)\reports\compare\page.tsx:55: verified += ind.responses.filter(r => r.assessment.assessorId === ev.id).length
+src\app\(dashboard)\reports\compare\page.tsx:82: {analytics.provisionalPercentage !== null ? getPerformanceBand(analytics.provisionalPercentage) : "غير مقيم"}
+src\app\(dashboard)\reports\compare\page.tsx:205: {getPerformanceBand(a.score)}
+src\app\(dashboard)\reports\print\page.tsx:6: import { getPerformanceLevel } from "@/lib/performance"
+src\app\(dashboard)\reports\print\page.tsx:78: const level = getPerformanceLevel(pct)
+src\app\(dashboard)\reports\print\page.tsx:154: const level = getPerformanceLevel(pct)
+src\app\(dashboard)\reports\print\page.tsx:193: const level = getPerformanceLevel(pct)
+src\app\(school-manager)\school-manager\page.tsx:14: import { getSchoolAnalytics, getBranchAnalytics } from "@/features/quality-reports/services/analytics"
+src\app\(school-manager)\school-manager\page.tsx:15: import { getPerformanceBand } from "@/features/quality-assessment/services/analysis"
+src\app\(school-manager)\school-manager\page.tsx:26: const perf = await getBranchAnalytics(user.branchId)
+src\app\(school-manager)\school-manager\page.tsx:155: const perf = await getSchoolAnalytics(schoolId)
+src\app\(school-manager)\school-manager\quality\page.tsx:10: import { getSchoolAnalytics } from "@/features/quality-reports/services/analytics"
+src\app\(school-manager)\school-manager\quality\page.tsx:11: import { getPerformanceBand } from "@/features/quality-assessment/services/analysis"
+src\app\(school-manager)\school-manager\quality\page.tsx:18: const perf = await getSchoolAnalytics(schoolId)
+src\app\quality\assessments\[assessmentId]\results\page.tsx:19: const assessment = await prisma.assessment.findUnique({
+src\data\mock-school-data.ts:36: { id: 'A1', schoolId: 'S1', branchId: 'B1', assessorId: 'U4', status: 'IN_PROGRESS', progress: 80, score: 0, startedAt: '2024-05-01' },
+src\data\mock-school-data.ts:37: { id: 'A2', schoolId: 'S1', branchId: 'B2', assessorId: 'U4', status: 'COMPLETED', progress: 100, score: 85, startedAt: '2024-04-01', completedAt: '2024-04-15' },
+src\data\mock-school-data.ts:38: { id: 'A3', schoolId: 'S1', branchId: 'B3', assessorId: 'U5', status: 'NOT_STARTED', progress: 0, score: 0, startedAt: '2024-05-20' },
+src\features\ai-assistant\services\context.ts:64: where: { assessorId: user.id },
+src\features\ai-assistant\services\router.ts:80: if (user.role === "QUALITY_ASSESSOR") gapWhere.assessment = { assessorId: user.id, type: "NORMAL" }
+src\features\quality-assessment\actions.ts:12: const assessment = await prisma.assessment.findUnique({
+src\features\quality-assessment\actions.ts:14: select: { id: true, assessorId: true, schoolId: true, branchId: true, type: true, status: true }
+src\features\quality-assessment\actions.ts:24: if (assessment.assessorId !== user.id) {
+src\features\quality-assessment\actions.ts:32: if (assessment.assessorId !== user.id) {
+src\features\quality-assessment\actions.ts:85: const assessment = await prisma.assessment.findUnique({
+src\features\quality-assessment\actions.ts:87: select: { assessorId: true, schoolId: true, branchId: true, type: true }
+src\features\quality-assessment\actions.ts:93: if (assessment.assessorId !== user.id) {
+src\features\quality-assessment\actions.ts:227: assessorId: user.id,
+src\features\quality-assessment\actions\gaps.ts:85: select: { id: true, schoolId: true, branchId: true, assessorId: true, type: true }
+src\features\quality-assessment\actions\gaps.ts:95: if (!(user.role === "SUPER_ADMIN" && assessment.assessorId === user.id)) {
+src\features\quality-assessment\actions\gaps.ts:105: if (assessment.assessorId === user.id) {
+src\features\quality-assessment\actions\gaps.ts:112: allowed = assessment.assessorId === user.id
+src\features\quality-assessment\components\AssessmentEngine.tsx:62: const isReadOnly = isCompleted || (userRole === "SUPER_ADMIN" ? assessment.type !== "PRIVATE_REVIEW" : userId !== assessment.assessorId)
+src\features\quality-assessment\services\aggregation.ts:3: import { getPerformanceBand } from "./analysis"
+src\features\quality-assessment\services\aggregation.ts:25: export async function compareAssessments(assessmentIds: string[]) {
+src\features\quality-assessment\services\aggregation.ts:141: return { assessorId: a.assessor?.id ?? "unknown", assessorName: a.assessor?.name ?? "غير محدد", score }
+src\features\quality-assessment\services\aggregation.ts:158: band: getPerformanceBand(avg)
+src\features\quality-assessment\services\aggregation.ts:169: performanceBand: getPerformanceBand(averageScore),
+src\features\quality-assessment\services\analysis.ts:37: export async function getPlatformAnalytics() {
+src\features\quality-assessment\services\analysis.ts:69: export async function getSchoolAnalytics(schoolId: string): Promise<BranchAnalytics> {
+src\features\quality-assessment\services\analysis.ts:164: export async function getBranchAnalytics(branchId: string): Promise<BranchAnalytics> {
+src\features\quality-assessment\services\analysis.ts:269: export function getPerformanceBand(score: number | null): string {
+src\features\quality-reports\services\analytics.ts:40: export async function getPlatformAnalytics() {
+src\features\quality-reports\services\analytics.ts:71: export async function getSchoolAnalytics(schoolId: string): Promise<BranchAnalytics> {
+src\features\quality-reports\services\analytics.ts:159: export async function getBranchAnalytics(branchId: string): Promise<BranchAnalytics> {
+src\features\search\actions.ts:60: { assessment: { assessorId: user.id } }
+src\features\search\actions.ts:70: where: { description: whereQuery, assessment: { assessorId: user.id } },
+src\lib\performance.ts:7: export function getPerformanceLevel(percentage: number | null | undefined): PerformanceLevel {
+src\lib\permissions.ts:86: assessorId: string | null
+src\lib\permissions.ts:101: *  - غيره: يجب أن يكون هو المُقيّم المالك (assessorId) مع احترام نطاق المدرسة/الفرع.
+src\lib\permissions.ts:112: return user.role === "SUPER_ADMIN" && assessment.assessorId === user.id
+src\lib\permissions.ts:123: return assessment.assessorId === user.id && assessment.schoolId === user.schoolId
+src\lib\permissions.ts:127: if (assessment.assessorId === user.id) {
+src\lib\permissions.ts:139: return assessment.assessorId === user.id
+src\lib\permissions.ts:152: const assessment = await prisma.assessment.findUnique({
+src\lib\permissions.ts:154: select: { id: true, schoolId: true, branchId: true, assessorId: true, type: true }
+src\types\index.ts:107: assessorId: string;

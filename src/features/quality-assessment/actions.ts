@@ -1,7 +1,15 @@
+// ===== FILE: src/features/quality-assessment/actions.ts =====
 "use server"
 
 import { prisma } from "@/lib/prisma"
-import { getCurrentUser, checkAssessmentAccess } from "@/lib/permissions"
+import {
+  getCurrentUser,
+  checkAssessmentAccess,
+  assertAssessmentAccess,
+  getStageEditPolicy,
+  assertStageCreationAllowed
+} from "@/lib/permissions"
+import { isValidStage, getStageLabel } from "@/lib/stages"
 import { revalidatePath } from "next/cache"
 import { redirect } from "next/navigation"
 
@@ -62,11 +70,15 @@ export async function saveEvidenceResponse(assessmentId: string, evidenceId: str
   }
 
   const totalEvidence = await prisma.fixedEvidence.count()
-  const verifiedEvidence = await prisma.evidenceResponse.count({
-    where: { assessmentId, isVerified: true }
+  // (إصلاح التضخم) المتحقق = شواهد مميزة لا صفوف — صف الزيارة الإضافي لنفس شاهد
+  // الملاحظة الصفية لا يضاعف الشاهد، فلا تتخطى نسبة التقدم 100% أصلًا
+  const verifiedRows = await prisma.evidenceResponse.findMany({
+    where: { assessmentId, isVerified: true },
+    select: { evidenceId: true },
+    distinct: ["evidenceId"],
   })
   
-  const progress = totalEvidence > 0 ? Math.round((verifiedEvidence / totalEvidence) * 100) : 0
+  const progress = totalEvidence > 0 ? Math.round((verifiedRows.length / totalEvidence) * 100) : 0
   
   await prisma.assessment.update({
     where: { id: assessmentId },
@@ -97,13 +109,30 @@ export async function finishAssessment(assessmentId: string) {
   if (user.role === "SCHOOL_MANAGER" && assessment.schoolId !== user.schoolId) throw new Error("Forbidden")
   if (user.role === "BRANCH_MANAGER" && assessment.branchId !== user.branchId) throw new Error("Forbidden")
 
-  const totalIndicators = await prisma.indicator.count({ where: { coverage: "مغطى" } })
-  const answeredIndicators = await prisma.evidenceResponse.count({ 
-    where: { assessmentId, isVerified: true } 
+  // فحص الاكتمال قبل الإنهاء — بنفس وحدات ومصدر نسبة التقدم المعروضة للمقيّم:
+  // إجمالي شواهد النموذج الثابت مقابل الشواهد المتحققة في هذا التقييم
+  // (نفس المعادلة المستخدمة في saveEvidenceResponse والتقارير والتحليلات وحلقة
+  //  التقدم في الواجهة — كي يتطابق «100% في الشاشة» مع سماح الخادم بالإنهاء).
+  // (سابقًا: كان يقارن عدد المؤشرات «مغطى» في كل قاعدة البيانات مع عدد صفوف
+  //  الاستجابات لهذا التقييم — وحدتان ونطاقان مختلفان، وقد يستحيل معه الإنهاء
+  //  نهائيًا إن وُجد مؤشر «مغطى» بلا شواهد في النموذج الثابت.)
+  const totalEvidence = await prisma.fixedEvidence.count()
+  // (إصلاح التضخم) نفس عدّاد التقدم المعروض: شواهد مميزة متحققة — لا صفوف زيارات
+  const verifiedRows = await prisma.evidenceResponse.findMany({
+    where: { assessmentId, isVerified: true },
+    select: { evidenceId: true },
+    distinct: ["evidenceId"],
   })
+  const verifiedEvidence = verifiedRows.length
 
-  if (answeredIndicators < totalIndicators) {
-    throw new Error("Cannot finish: There are uncovered indicators remaining.")
+  if (totalEvidence > 0 && verifiedEvidence < totalEvidence) {
+    const remaining = totalEvidence - verifiedEvidence
+    const remainingLabel =
+      remaining === 1 ? "شاهد واحد" :
+      remaining === 2 ? "شاهدان" :
+      remaining <= 10 ? `${remaining} شواهد` :
+      `${remaining} شاهدًا`
+    throw new Error(`لا يمكن الإنهاء: تبقّى ${remainingLabel} لم يتم التحقق منه. أكمل التحقق من جميع الشواهد ثم أعد المحاولة.`)
   }
 
   await prisma.assessment.update({
@@ -216,9 +245,33 @@ export async function deleteAttachment(attachmentId: string, assessmentId: strin
   })
 }
 
-export async function createNewAssessment() {
+/**
+ * إنشاء تقييم جديد — الآن بإلزامية المرحلة التعليمية وربط العام الدراسي:
+ *  1) التحقق من صحة قيمة المرحلة على الخادم (لا ثقة بالعميل).
+ *  2) فرض تخويل المرحلة حسب الدور وتعيينات المستخدم (assertStageCreationAllowed).
+ *  3) كل تقييم ينتمي لمرحلة واحدة بالضبط — لا دمج مراحل في تقييم واحد.
+ *  4) العام الدراسي يُثبَّت وقت الإنشاء من العام النشط للمدرسة (علاقة صريحة
+ *     academicYearId) — وإن لم يكن هناك عام نشط يُنشأ بلا عام (NULL يُعرض
+ *     «غير محدد» للمراجعة) ولا يُخترع رابط تاريخي أبدًا. تبديل العام النشط
+ *     لاحقًا لا يمس هذه الارتباطات المخزّنة.
+ * يُستدعى من منتقي المرحلة (NewAssessmentStagePicker) بعد اختيار المستخدم لمرحلته.
+ */
+export async function createNewAssessment(stage: string) {
   const user = await getCurrentUser()
   if (!user || !user.schoolId) throw new Error("Unauthorized")
+
+  // فحص محلي يضمن صحة القيمة (ويتيح للتايب سكريبت تضييق النوع قبل كتابته في Prisma)
+  if (!isValidStage(stage)) {
+    throw new Error("المرحلة التعليمية المحددة غير صحيحة.")
+  }
+
+  await assertStageCreationAllowed(user, stage)
+
+  // العام الدراسي النشط وقت الإنشاء — يُثبَّت على السجل ولا يتغير لاحقًا
+  const activeYear = await prisma.academicYear.findFirst({
+    where: { schoolId: user.schoolId, isActive: true },
+    select: { id: true }
+  })
 
   const assessment = await prisma.assessment.create({
     data: {
@@ -226,8 +279,58 @@ export async function createNewAssessment() {
       branchId: user.branchId || null,
       assessorId: user.id,
       status: "IN_PROGRESS",
-      type: "NORMAL"
+      type: "NORMAL",
+      stage,
+      academicYearId: activeYear?.id ?? null
     }
   })
   redirect(`/quality-assessor/assessments/${assessment.id}`)
+}
+
+/**
+ * تعديل مرحلة تقييم قائم — سياسة موحدة عبر getStageEditPolicy:
+ *  - الصلاحية حسب الدور (مدير النظام/المدرسة/الملكية) — لا تجاوز للعزل.
+ *  - المكتمل ذو المرحلة المحددة مُقفل؛ المكتمل بلا مرحلة (سجل تاريخي) يُعاد تعيينه مرة.
+ *  - يحدّث حقل stage فقط — لا يمس أي استجابة أو شاهد أو نتيجة، ولا يدمج التقييم بأي سجل آخر.
+ *  - يسجل العملية في سجل النشاط للتدقيق.
+ */
+export async function updateAssessmentStage(assessmentId: string, stage: string) {
+  const user = await getCurrentUser()
+  if (!user) throw new Error("Unauthorized")
+
+  if (!isValidStage(stage)) {
+    throw new Error("المرحلة التعليمية المحددة غير صحيحة.")
+  }
+
+  const assessment = await prisma.assessment.findUnique({
+    where: { id: assessmentId },
+    select: { id: true, schoolId: true, branchId: true, assessorId: true, type: true, status: true, stage: true }
+  })
+  if (!assessment) throw new Error("Assessment not found")
+
+  const policy = await getStageEditPolicy(user, assessment)
+  if (!policy.allowed) {
+    throw new Error(policy.reason ?? "Forbidden: لا تملك صلاحية تعديل مرحلة هذا التقييم.")
+  }
+
+  await prisma.assessment.update({
+    where: { id: assessmentId },
+    data: { stage }
+  })
+
+  await prisma.activity.create({
+    data: {
+      actorId: user.id,
+      schoolId: assessment.schoolId,
+      branchId: assessment.branchId,
+      action: "UPDATE",
+      entityType: "ASSESSMENT",
+      entityId: assessmentId,
+      metadata: { description: `تم تعيين/تحديث المرحلة التعليمية للتقييم إلى: ${getStageLabel(stage)}` }
+    }
+  })
+
+  revalidatePath(`/quality-assessor/assessments/${assessmentId}`)
+  revalidatePath("/quality-assessor")
+  revalidatePath("/reports")
 }

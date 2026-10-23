@@ -1,9 +1,11 @@
+// ===== FILE: src/app/(dashboard)/settings/actions.ts =====
 "use server"
 
 import { prisma } from "@/lib/prisma"
 import { getCurrentUser } from "@/lib/permissions"
 import { revalidatePath } from "next/cache"
 import bcrypt from "bcryptjs"
+import { normalizeStageIds } from "@/lib/stages"
 
 export async function updateProfile(formData: FormData) {
   const user = await getCurrentUser()
@@ -76,4 +78,47 @@ export async function createBackup() {
     await prisma.backupHistory.create({ data: { type: "Manual JSON Export", status: "FAILED", fileSize: 0 } })
     throw new Error("Failed to create backup")
   }
+}
+
+/* ============================================================
+   (جديد — هذه المهمة) تحديث المراحل التعليمية لحساب مقيّم الجودة من صفحة
+   إعداداته هو — لمعالجة الحسابات القائمة التي بلا تعيين مراحل دون إعادة إنشائها.
+
+   قواعد الأمان:
+   - QUALITY_ASSESSOR على حسابه هو حصرًا (لا يقبل userId من العميل إطلاقًا).
+   - القيم تُطبَّع وتُتحقق على الخادم عبر normalizeStageIds (المراحل الخمس فقط —
+     أي قيمة أخرى تُرفض برسالة واضحة) — لا ثقة بالعميل أبدًا.
+   - نطاق مقيّم الجودة صارم دائمًا (getUserStageGrant): اختيار المراحل من حسابه
+     لا يمنحه أي صلاحية إضافية — يحدد فقط المراحل التي يُسمح له بإنشاء تقييماتها.
+   - لا يلمس كلمة المرور ولا الدور ولا المدرسة/الفرع ولا أي بيانات أخرى.
+   - التحديث يُسجل في سجل النشاط (Activity) قابلًا للتدقيق.
+   ============================================================ */
+export async function updateMyStages(formData: FormData) {
+  const user = await getCurrentUser()
+  if (!user) throw new Error("Unauthorized")
+  if (user.role !== "QUALITY_ASSESSOR") {
+    throw new Error("Forbidden: تحديث المراحل التعليمية من الإعدادات متاح لحسابات مقيّم الجودة فقط.")
+  }
+
+  const stages = normalizeStageIds(formData.getAll("stages"))
+
+  await prisma.user.update({
+    where: { id: user.id },
+    data: { stages }
+  })
+
+  await prisma.activity.create({
+    data: {
+      actorId: user.id,
+      schoolId: user.schoolId,
+      branchId: user.branchId,
+      action: "UPDATE",
+      entityType: "USER",
+      entityId: user.id,
+      metadata: { description: "تحديث المراحل التعليمية من صفحة الإعدادات", stages }
+    }
+  })
+
+  revalidatePath("/settings")
+  revalidatePath("/", "layout")
 }

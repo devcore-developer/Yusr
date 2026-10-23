@@ -1,4 +1,19 @@
+// ===== FILE: src/features/landing/actions.ts =====
 "use server"
+
+// ============================================================
+// landing/actions.ts — نفس الدوال القائمة + إضافات تكامل الاستبانات فقط
+// ============================================================
+// حفظ الأول: سلوك addSurvey القائم محفوظ حرفيًا (نفس الحقول ونفس شكل الاستجابة
+// {success}/{error} ونفس ربط schoolId بالمستخدم). الإضافات اختيارية بحتة:
+//   - indicatorId (اختياري): ربط صريح بمعرّف البند — يُتحقق من وجوده، لا تخمين.
+//   - respondents (اختياري): عدد الاستجابات كما يُدخله المستخدم — null = غير مسجل.
+//   - تحقق خادمي 0..100 للنسبة (رفض القيم غير الصالحة بدل قبولها بصمت).
+//   - إصلاح قراءة علم include: checkbox صفحة الاستبانات يرسل "on" بينما الكود القائم
+//     يقارن بـ "true" فقط → كان يُخزَّن دائمًا false مهما اختار المستخدم.
+//     القراءة الجديدة تقبل الاثنين ("true" من نموذج الهبوط القائم + "on" من checkbox)
+//     فتعبّر القيمة المخزنة عن اختيار المستخدم الفعلي — لا تغيير لأي سلوك آخر.
+// ============================================================
 
 import { prisma } from "@/lib/prisma"
 import { getCurrentUser } from "@/lib/permissions"
@@ -31,13 +46,45 @@ export async function addSurvey(formData: FormData) {
   if (!user) throw new Error("Unauthorized")
 
   const type = formData.get("type") as string
-  const percentage = parseFloat(formData.get("percentage") as string)
-  const include = formData.get("include") === "true"
+  const percentageRaw = formData.get("percentage") as string
+  const include = formData.get("include") === "true" || formData.get("include") === "on" // إصلاح قراءة checkbox — انظر الترويسة
   const note = formData.get("note") as string
   const generalResult = formData.get("generalResult") as string
 
-  if (!type || isNaN(percentage)) {
+  // (جديد، اختياري) ربط صريح بمعرّف البند — فارغ = استبانة مستقلة تُحفظ كما هي
+  const indicatorIdRaw = formData.get("indicatorId") as string | null
+  const indicatorId = indicatorIdRaw && indicatorIdRaw.trim() !== "" ? indicatorIdRaw.trim() : null
+
+  // (جديد، اختياري) عدد الاستجابات المسجل يدويًا
+  const respondentsRaw = formData.get("respondents") as string | null
+  let respondents: number | null = null
+  if (respondentsRaw && respondentsRaw.trim() !== "") {
+    const parsed = Number(respondentsRaw)
+    if (!Number.isFinite(parsed) || !Number.isInteger(parsed) || parsed < 0) {
+      return { error: "عدد الاستجابات يجب أن يكون عددًا صحيحًا غير سالب." }
+    }
+    respondents = parsed
+  }
+
+  if (!type || isNaN(parseFloat(percentageRaw))) {
     return { error: "البيانات غير صحيحة" }
+  }
+
+  // تحقق خادمي من النطاق — القيم خارج 0..100 تُرفض بدل تخزينها (السجلات التاريخية كما هي)
+  const percentage = parseFloat(percentageRaw)
+  if (percentage < 0 || percentage > 100) {
+    return { error: "النسبة المئوية يجب أن تكون بين 0 و 100." }
+  }
+
+  // الربط الصريح: البند يجب أن يوجد فعلًا — لا ربط بقيمة تخمينية
+  if (indicatorId !== null) {
+    const indicator = await prisma.indicator.findUnique({
+      where: { id: indicatorId },
+      select: { id: true },
+    })
+    if (!indicator) {
+      return { error: "المؤشر المحدد غير موجود في إطار التقويم." }
+    }
   }
 
   try {
@@ -49,9 +96,11 @@ export async function addSurvey(formData: FormData) {
         note: note || null,
         generalResult: generalResult || null,
         schoolId: user.schoolId || null,
+        indicatorId, // (جديد، اختياري) — null = غير مرتبطة (تنجو كالسابق)
+        respondents, // (جديد، اختياري) — null = غير مسجل
       }
     })
-    
+
     revalidatePath("/surveys")
     return { success: true }
   } catch (error) {

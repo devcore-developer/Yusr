@@ -1,5 +1,6 @@
+// ===== FILE: src/app/quality/assessments/[assessmentId]/results/page.tsx =====
 import { prisma } from "@/lib/prisma"
-import { getCurrentUser, assertAssessmentAccess } from "@/lib/permissions"
+import { getCurrentUser, assertAssessmentAccess, getStageEditPolicy } from "@/lib/permissions"
 import { redirect } from "next/navigation"
 import { PageHeader } from "@/components/layout/PageHeader"
 import { Card, CardHeader, CardTitle, CardContent, CardDescription } from "@/components/ui/Card"
@@ -7,10 +8,16 @@ import { StatCard } from "@/components/dashboard/StatCard"
 import { Badge, StatusBadge, PriorityBadge } from "@/components/ui/Badge"
 import { Progress } from "@/components/ui/Progress"
 import { EmptyState } from "@/components/ui/EmptyState"
-import { CheckCircle, XCircle, FileText, AlertTriangle, ArrowRight } from "lucide-react"
+import { CheckCircle, XCircle, FileText, AlertTriangle, ArrowRight, BarChart2 } from "lucide-react"
 import Link from "next/link"
 import { Button } from "@/components/ui/Button"
 import { formatDate } from "@/lib/utils"
+import { getStageLabel } from "@/lib/stages"
+import { StageEditor } from "@/features/quality-assessment/components/StageEditor"
+import { AcademicYearBadge } from "@/components/academic-years/AcademicYearBadge"
+import { SurveyComparisonTable } from "@/components/reports/SurveyComparisonTable"
+import { buildItemComparison } from "@/features/quality-reports/services/survey-integration"
+import { getSurveyIntegrationConfig, getSchoolLinkedSurveysByIndicator } from "@/features/quality-reports/services/survey-integration.server"
 
 export default async function AssessmentResultsPage({ params }: { params: { assessmentId: string } }) {
   const user = await getCurrentUser()
@@ -22,7 +29,14 @@ export default async function AssessmentResultsPage({ params }: { params: { asse
       school: true, 
       branch: true, 
       assessor: true,
+      academicYear: true, // العام المخزّن لهذا التقييم — لا يُقرأ من العام النشط الحالي
       gaps: { include: { indicator: { include: { domain: true } } } },
+      // (جديد) الاستجابات المتحققة لقسم مقارنة البنود مع الاستبانات — من هذا التقييم فقط
+      // (evidenceId يُفعّل تفريد الشواهد في buildItemComparison — زيارات الملاحظة الصفية)
+      evidenceResponses: {
+        where: { isVerified: true },
+        select: { evidenceId: true, evidence: { select: { indicatorId: true } } },
+      },
     },
   })
   
@@ -34,7 +48,29 @@ export default async function AssessmentResultsPage({ params }: { params: { asse
   const allowed = await assertAssessmentAccess(user, assessment, "read")
   if (!allowed) redirect("/")
 
+  // (هذه المهمة) سياسة تعديل مرحلة هذا التقرير — نفس السياسة المفروضة خادميًا
+  // في updateAssessmentStage: المكتمل المحدد المرحلة مُقفل، والمكتمل بلا مرحلة
+  // (سجل تاريخي) قابل للتعيين مرة واحدة مع تأكيد صريح وتسجيل في سجل النشاط.
+  const stagePolicy = await getStageEditPolicy(user, assessment)
+
   const confirmedGaps = assessment.gaps
+
+  // (جديد) بيانات مقارنة البنود المرتبطة باستبانات — كل الأرقام من الخدمة النقية
+  // survey-integration.ts: درجة الأدوات بنفس معادلة جداول المجالات، ونتيجة الاستبانة
+  // من الربط الصريح بالمعرّفات لهذه المدرسة فقط، والمدمجة غير رسمية ولا تعود إلا بإعداد معتمد.
+  const [officialDomains, surveyConfig, linkedSurveysByIndicator] = await Promise.all([
+    prisma.domain.findMany({
+      include: { indicators: { include: { fixedEvidence: true } } },
+    }),
+    getSurveyIntegrationConfig(assessment.schoolId),
+    getSchoolLinkedSurveysByIndicator(assessment.schoolId),
+  ])
+  const comparison = buildItemComparison({
+    officialDomains,
+    verifiedResponses: assessment.evidenceResponses,
+    linkedSurveysByIndicator,
+    config: surveyConfig,
+  })
 
   return (
     <div className="space-y-6 lg:space-y-8">
@@ -48,10 +84,25 @@ export default async function AssessmentResultsPage({ params }: { params: { asse
         ]}
         actions={
           <div className="flex items-center gap-3">
+            {/* العام الدراسي من العلاقة المخزّنة للتقييم — السجلات التاريخية بلا عام تظهر «غير محدد» */}
+            <AcademicYearBadge year={assessment.academicYear} />
+            <Badge variant={assessment.stage ? "info" : "neutral"}>{getStageLabel(assessment.stage)}</Badge>
             <StatusBadge status={assessment.status} />
             <span className="text-[13px] text-muted-foreground numeric">{formatDate(assessment.startedAt.toISOString())}</span>
           </div>
         }
+      />
+
+      {/* (هذه المهمة) قسم المرحلة التعليمية للتقرير — عرض وتصحيح للمرحلة المحفوظة
+          وفق نفس سياسة الصلاحيات القائمة (getStageEditPolicy). المرحلة تُقرأ من
+          حقل التقييم المخزن حصرًا — لا تُورث من إعدادات أي حساب ولا تتغير
+          صامتًا، والتقييم المكتمل المحدد المرحلة يبقى مقفولًا. */}
+      <StageEditor
+        assessmentId={assessment.id}
+        currentStage={assessment.stage}
+        canEdit={stagePolicy.allowed}
+        lockHint={stagePolicy.reason}
+        isCompleted={assessment.status === "COMPLETED"}
       />
 
       {/* ===== Executive Summary ===== */}
@@ -113,6 +164,22 @@ export default async function AssessmentResultsPage({ params }: { params: { asse
           )}
         </CardContent>
       </Card>
+
+      {/* (جديد) مقارنة نتائج البنود المرتبطة باستبانات — قسم مكمّل للعرض والمقارنة فقط،
+          لا يغيّر نتيجة التقييم الرسمية ولا أوزان المجالات. يظهر فقط عند وجود بنود مرتبطة فعلًا. */}
+      {comparison.rows.length > 0 && (
+        <Card>
+          <CardHeader>
+            <CardTitle icon={<BarChart2 className="w-5 h-5" />}>مقارنة نتائج البنود مع الاستبانات</CardTitle>
+            <CardDescription>
+              نتيجة التقييم بالأدوات ونتيجة الاستبانة والنتيجة المدمجة (غير رسمية) لكل بند مرتبط — {comparison.rows.length} بند
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="p-4">
+            <SurveyComparisonTable rows={comparison.rows} diagnostics={comparison.diagnostics} variant="screen" />
+          </CardContent>
+        </Card>
+      )}
     </div>
   )
 }
