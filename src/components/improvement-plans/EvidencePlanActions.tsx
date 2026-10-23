@@ -36,6 +36,12 @@ import type { ExistingPlanRef } from "@/features/improvement-plans/plan-context"
  * نفس نص التأكيد حرفيًا لكن داخل نافذة أنيقة بوسط الشاشة بنفس نمط النوافذ
  * القائم في المشروع، والخطأ يُعرض داخلها وتبقى مفتوحة لإعادة المحاولة.
  *
+ * (Task 22-وضوح) أساس الدرجة صار ظاهرًا بذاته: بجانب النسبة يُعرض «متحقق X من
+ * Y ... للمؤشر» (الأعداد من getIndicatorEvidenceScores نفسها — verifiedCount
+ * وtotalEvidence بلا أي حساب جديد) حتى لا تُقرأ النسبة كدرجة لصف الشاهد نفسه —
+ * فالدرجة المرجعية للمؤشر الواحد وتتكرر على صفوف شواهده لأن الخطة تُنشأ
+ * للمؤشر لا للشاهد، ومقامها إجمالي شواهد المؤشر في البنك عبر كل الأدوات.
+ *
  * (Task 22) حالة «تم الإنشاء» المُستدامة: عندما توجد خطة قائمة لهذا المؤشر في
  * التقييم المرجعي (تُجلب من قاعدة البيانات وتُمرر من الصفحة عبر existingPlan —
  * أو تُعاد للتو من createEvidencePlan) يُستبدل زر الإنشاء بزر حالة أخضر يفتح
@@ -67,9 +73,32 @@ interface EvidencePlanActionsProps {
   /** (Task 22) الخطة القائمة لهذا المؤشر في التقييم المرجعي — من قاعدة البيانات حصرًا
    *  (بمعرفها الفعلي — لا مطابقة عناوين). وجودها يحوّل زر الإنشاء إلى زر حالة أخضر */
   existingPlan?: ExistingPlanRef | null
+  /** (Task 22-وضوح) عدد الشواهد المتحققة للمؤشر في التقييم المرجعي — يُعرض بجانب
+   *  النسبة ليصير أساسها مبيّنًا ذاتيًا («متحقق X من Y») بدل نسبة مجردة */
+  verifiedCount?: number | null
+  /** (Task 22-وضوح) إجمالي شواهد المؤشر الثابتة في البنك — مقام النسبة */
+  totalEvidence?: number | null
 }
 
-export function EvidencePlanActions({ indicatorId, assessmentId, gapId, score = null, canCreatePlan, existingPlan = null }: EvidencePlanActionsProps) {
+// (Task 22-وضوح) تمييز العدد العربي الصحيح حسب الإجمالي:
+// 1 شاهد / 2 شاهدين / 3-10 شواهد / 11+ شاهدًا — قراءة سليمة لأي مؤشر مهما كان عدد شواهده
+function evidenceCountWord(total: number): string {
+  if (total === 1) return "شاهد"
+  if (total === 2) return "شاهدين"
+  if (total >= 3 && total <= 10) return "شواهد"
+  return "شاهدًا"
+}
+
+// (Task 22-وضوح) ذيل سطر الدرجة التوضيحي — null عندما لا توجد أعداد صالحة للعرض
+// (الأرقام داخل جملة عربية فلا تحتاج عزل dir — المحيط كلمات عربية يثبّت موضعها)
+function evidenceCountsLabel(verifiedCount: number | null | undefined, totalEvidence: number | null | undefined): string | null {
+  const total = totalEvidence ?? 0
+  if (total <= 0) return null
+  const verified = verifiedCount ?? 0
+  return ` — متحقق ${verified} من ${total} ${evidenceCountWord(total)} للمؤشر`
+}
+
+export function EvidencePlanActions({ indicatorId, assessmentId, gapId, score = null, canCreatePlan, existingPlan = null, verifiedCount = null, totalEvidence = null }: EvidencePlanActionsProps) {
   const router = useRouter()
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -86,6 +115,8 @@ export function EvidencePlanActions({ indicatorId, assessmentId, gapId, score = 
   const isSustainability = classifyPlanKind(score) === "SUSTAINABILITY"
   // (Task 21) حالة صريحة للدرجة غير المتاحة — لا تصنيف صامت عند غياب الرابط الموثوق
   const scoreUnavailable = score === null || score === undefined
+  // (Task 22-وضوح) «متحقق X من Y للمؤشر» — من الأعداد الواردة بلا أي حساب جديد
+  const countsLabel = evidenceCountsLabel(verifiedCount, totalEvidence)
   // (Task 22) الخطة الفعالة: المعادة للتو تفضّل على المُمررة من الخادم (أحدث)
   const effectivePlan = created ?? existingPlan
   const openPlan = () => {
@@ -141,7 +172,7 @@ export function EvidencePlanActions({ indicatorId, assessmentId, gapId, score = 
         )}
         {score !== null && (
           <span className="text-[12px] text-muted-foreground">
-            الدرجة المرجعية: <span dir="ltr" className="numeric">{score}%</span>
+            الدرجة المرجعية: <span dir="ltr" className="numeric">{score}%</span>{countsLabel}
           </span>
         )}
       </div>
@@ -166,7 +197,7 @@ export function EvidencePlanActions({ indicatorId, assessmentId, gapId, score = 
               {/* (إصلاح Bidi) الرقم + % محصورين في span اتجاهه LTR صريح حتى لا تقفز
                   العلامة إلى أول السطر العربي (تظهر %40 أو قبل الجملة في RTL) —
                   dir="ltr" يجعل «40%» وحدة واحدة ثابتة الترتيب في أي سياق */}
-              الدرجة المرجعية: <span dir="ltr" className="numeric">{score}%</span>
+              الدرجة المرجعية: <span dir="ltr" className="numeric">{score}%</span>{countsLabel}
             </span>
           )}
         </div>
@@ -216,3 +247,4 @@ export function EvidencePlanActions({ indicatorId, assessmentId, gapId, score = 
     </>
   )
 }
+

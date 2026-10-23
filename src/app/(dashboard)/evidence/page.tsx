@@ -1,7 +1,4 @@
 // ===== FILE: src/app/(dashboard)/evidence-bank/page.tsx =====
-// (معدّل — جلب الخطط القائمة من قاعدة البيانات وتمريرها للمكوّن)
-// احفظه بمسار ملفك المحلي نفسه
-
 import { prisma } from "@/lib/prisma"
 import { getCurrentUser } from "@/lib/permissions"
 import { redirect } from "next/navigation"
@@ -12,7 +9,7 @@ import { Input } from "@/components/ui/Input"
 import { Database, Search } from "lucide-react"
 import { Button } from "@/components/ui/Button"
 import { EvidencePlanActions } from "@/components/improvement-plans/EvidencePlanActions"
-import { getIndicatorEvidenceScores } from "@/features/improvement-plans/queries"
+import { getIndicatorEvidenceScores, type IndicatorEvidenceScore } from "@/features/improvement-plans/queries"
 import { pickExistingPlan, type ExistingPlanRef } from "@/features/improvement-plans/plan-context"
 
 // Official tool order as per the HTML reference file
@@ -81,7 +78,9 @@ export default async function EvidenceBankPage({
   // والخادم يفرض الحد نفسه عند الإنشاء).
   const canCreatePlan = user.role === "QUALITY_ASSESSOR"
   let authoritativeAssessmentId: string | null = null
-  const indicatorScores: Record<string, number | null> = {}
+  // (Task 22-وضوح) تُخزّن نتيجة الدرجة كاملة (verifiedCount + totalEvidence + percentage)
+  // لا النسبة وحدها — فتُعرض للأزرار «متحقق X من Y للمؤشر» ويصير أساس النسبة ظاهرًا بذاته
+  const indicatorScores: Record<string, IndicatorEvidenceScore> = {}
   // (Task 22) الخطط القائمة لكل مؤشر في التقييم المرجعي — تُقرأ من قاعدة البيانات
   // في كل تحميل صفحة، فحالة «تم الإنشاء» تبقى صحيحة بعد التنقل والتحديث
   // وتسجيل الدخول من جديد (لا حالة React مؤقتة ولا localStorage)
@@ -98,11 +97,11 @@ export default async function EvidenceBankPage({
       // target أقدم من ES2015 (نفس نمط صفحة مساحة التقييم حرفيًا)
       const scoresMap = await getIndicatorEvidenceScores(latestCompleted.id)
       for (const [indicatorId, s] of Array.from(scoresMap)) {
-        indicatorScores[indicatorId] = s.percentage
+        indicatorScores[indicatorId] = s
       }
       // (Task 22) الخطط القائمة لهذا التقييم المرجعي حصرًا — بمعرفات صريحة:
       // schoolId + assessmentId + indicatorId (لا مطابقة عناوين عربية ولا أسماء).
-      // تقييم أقدم أو خطة عام دراسي سابق لا تُظهر حالة هنا — النطاق نفسه
+      // تقييم أحدث أو خطة عام دراسي سابق لا تُظهر حالة هنا — النطاق نفسه
       // الضيق الذي يفرضه الخادم في منع التكرار (plan-context.ts)
       const existingPlans = await prisma.improvementPlan.findMany({
         where: { schoolId: user.schoolId, assessmentId: latestCompleted.id, indicatorId: { not: null } },
@@ -221,9 +220,11 @@ export default async function EvidenceBankPage({
                           <EvidencePlanActions
                             indicatorId={ev.indicatorId}
                             assessmentId={authoritativeAssessmentId}
-                            score={indicatorScores[ev.indicatorId] ?? null}
+                            score={indicatorScores[ev.indicatorId]?.percentage ?? null}
+                            verifiedCount={indicatorScores[ev.indicatorId]?.verifiedCount ?? null}
+                            totalEvidence={indicatorScores[ev.indicatorId]?.totalEvidence ?? null}
                             canCreatePlan={canCreatePlan}
-                            existingPlan={pickExistingPlan(plansByIndicator.get(ev.indicatorId), indicatorScores[ev.indicatorId] ?? null)}
+                            existingPlan={pickExistingPlan(plansByIndicator.get(ev.indicatorId), indicatorScores[ev.indicatorId]?.percentage ?? null)}
                           />
                         ) : (
                           <span className="text-[11px] text-muted-foreground">—</span>
@@ -257,9 +258,11 @@ export default async function EvidenceBankPage({
                   <EvidencePlanActions
                     indicatorId={ev.indicatorId}
                     assessmentId={authoritativeAssessmentId}
-                    score={indicatorScores[ev.indicatorId] ?? null}
+                    score={indicatorScores[ev.indicatorId]?.percentage ?? null}
+                    verifiedCount={indicatorScores[ev.indicatorId]?.verifiedCount ?? null}
+                    totalEvidence={indicatorScores[ev.indicatorId]?.totalEvidence ?? null}
                     canCreatePlan={canCreatePlan}
-                    existingPlan={pickExistingPlan(plansByIndicator.get(ev.indicatorId), indicatorScores[ev.indicatorId] ?? null)}
+                    existingPlan={pickExistingPlan(plansByIndicator.get(ev.indicatorId), indicatorScores[ev.indicatorId]?.percentage ?? null)}
                   />
                 ) : (
                   <p className="text-[11px] text-muted-foreground">الإجراء غير متاح — لا توجد نتيجة تقييم مرجعية.</p>
