@@ -1,4 +1,4 @@
-// ===== FILE: src/features/quality-reports/services/report-filters.ts ===== (★ جديد)
+// ===== FILE: src/features/quality-reports/services/report-filters.ts =====
 // ============================================================
 // فلترات سجل التقارير — وحدة نقية (بلا prisma) قابلة للاختبار آليًا
 // ============================================================
@@ -28,6 +28,14 @@ export interface ReportFilterValues {
   /** خيار مدير النظام فقط عمليًا — للأدوار الأخرى يظل النطاق مقيّدًا بمدرستهم (AND لا يوسّع) */
   schoolId?: string
   assessorId?: string
+  /**
+   * (جديد — إعادة تصميم سجل التقارير) بحث نصي حر يطابق اسم المدرسة أو الفرع
+   * أو المقيّم (مطابقة جزئية بلا حساسية لحالة الأحرف). يضيّق النطاق ولا يوسعه
+   * كأي فلتر آخر، وتُحترمه كل صفحات الاستهلاك (القائمة + الطباعة) عبر
+   * buildReportFilterWhere / reportSearchCondition حتى يبقى التقرير المطبوع
+   * مطابقًا للقائمة المفلترة.
+   */
+  q?: string
   /** undefined = كل الأعوام / null = سجلات بلا عام (للمراجعة) / نص = معرّف العام */
   academicYearId?: AcademicYearFilterValue
   /** من تاريخ (شامل — بداية اليوم بتوقيت UTC) */
@@ -80,7 +88,35 @@ export function resolveReportFilters(
     filters.status = status
   }
 
+  // (جديد) البحث النصي — القيم الفارغة تُتجاهل (نفس فلسفة firstParam)
+  const q = firstParam(sp.q)
+  if (q) filters.q = q
+
   return filters
+}
+
+/**
+ * (جديد) شكل جزء OR الخاص بالبحث النصي — بنية مطابقة لأجزاء Prisma Where
+ * على علاقات التقييم (المدرسة/الفرع/المقيّم) بلا أي استيراد من Prisma.
+ */
+export type ReportSearchCondition = Array<
+  | { school: { name: { contains: string; mode: "insensitive" } } }
+  | { branch: { name: { contains: string; mode: "insensitive" } } }
+  | { assessor: { name: { contains: string; mode: "insensitive" } } }
+>
+
+/**
+ * (جديد) شرط البحث النصي المشترك — مصدر واحد يُستهلك من buildReportFilterWhere
+ * ومن صفحة الطباعة معًا كي يطابق التقرير المطبوع القائمة المفلترة حرفيًا.
+ * العلاقة الجزئية (contains) مع mode: "insensitive" — قاعدة PostgreSQL تدعمها.
+ */
+export function reportSearchCondition(q: string): ReportSearchCondition {
+  const needle = { contains: q, mode: "insensitive" as const }
+  return [
+    { school: { name: needle } },
+    { branch: { name: needle } },
+    { assessor: { name: needle } },
+  ]
 }
 
 /**
@@ -94,6 +130,8 @@ export interface ReportFilterWhere {
   assessorId?: string
   academicYearId?: string | null
   startedAt?: { gte?: Date; lt?: Date }
+  /** (جديد) أجزاء البحث النصي — تُنشر داخل Where الاستعلام فتُدمج AND مع بقية الفلاتر */
+  OR?: ReportSearchCondition
 }
 
 export function buildReportFilterWhere(filters: ReportFilterValues): ReportFilterWhere {
@@ -107,6 +145,8 @@ export function buildReportFilterWhere(filters: ReportFilterValues): ReportFilte
     if (filters.from) where.startedAt.gte = filters.from
     if (filters.to) where.startedAt.lt = filters.to
   }
+  // (جديد) البحث النصي — OR على الأسماء يُدمج AND مع بقية الحقول (تضييق لا توسيع)
+  if (filters.q) where.OR = reportSearchCondition(filters.q)
   return where
 }
 
@@ -125,6 +165,8 @@ export function reportFiltersToParams(filters: ReportFilterValues): Record<strin
   }
   if (filters.from) out.from = filters.from.toISOString().slice(0, 10)
   if (filters.to) out.to = new Date(filters.to.getTime() - 24 * 60 * 60 * 1000).toISOString().slice(0, 10)
+  // (جديد) البحث النصي يُحمل في الروابط كي تطابقه كل صفحات الاستهلاك (الطباعة/التصدير)
+  if (filters.q) out.q = filters.q
   return out
 }
 

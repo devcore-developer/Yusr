@@ -22,6 +22,8 @@ import {
 import { countDistinctVerifiedEvidence } from "@/features/quality-reports/services/weighted-score"
 import { ReportFiltersBar } from "@/components/reports/ReportFiltersBar"
 import { WeightedEvaluationSection } from "@/components/reports/WeightedEvaluationSection"
+import { ReportsLogSection, type ReportsLogRowData } from "@/components/reports/ReportsLogSection"
+import { computeReportsLogKpis } from "@/features/quality-reports/services/reports-log"
 
 // ============================================================
 // فلتر المرحلة التعليمية (§6):
@@ -284,7 +286,7 @@ export default async function ReportsPage({
     // AssessmentStatusFilter من وحدة الفلاتر نفسها حتى يقبل مقارنة "ALL" ترجمةً ودلالةً.
     const listStatus: AssessmentStatusFilter =
       filters.status === "IN_PROGRESS" || filters.status === "ALL" ? filters.status : "COMPLETED"
-    const [saList, saAssessorRows, saYears, saTotalEvidence] = await Promise.all([
+    const [saList, saAssessorRows, saYears, saTotalEvidence, saScopeRows] = await Promise.all([
       prisma.assessment.findMany({
         where: {
           type: { not: "PRIVATE_REVIEW" },
@@ -308,10 +310,78 @@ export default async function ReportsPage({
       }),
       prisma.academicYear.findMany({ select: { id: true, label: true }, orderBy: { startYear: "desc" } }),
       prisma.fixedEvidence.count(),
+      // (إعادة تصميم سجل التقارير) نطاق القائمة الكامل — id + status فقط لكل التقييمات
+      // المطابقة (وليس أول 200 صف) كي تُحسب أرقام الملخص من كامل النطاق الفعلي
+      prisma.assessment.findMany({
+        where: {
+          type: { not: "PRIVATE_REVIEW" },
+          ...buildReportFilterWhere(filters),
+          ...(listStatus !== "ALL" ? { status: listStatus } : {}),
+        },
+        select: { id: true, status: true },
+      }),
     ])
-    const saAssessors = Array.from(
-      new Map(saAssessorRows.filter(r => r.assessor?.id).map(r => [r.assessor!.id, r.assessor!.name || "غير محدد"]))
+    // (إعادة تصميم سجل التقارير) توقيع صريح للخريطة — نفس التعبير والسلوك حرفيًا،
+    // والنوع الصريح يثبت شكل العناصر المستهلكة في سجل التقارير أدناه
+    const saAssessors: { id: string; name: string }[] = Array.from(
+      new Map<string, string>(saAssessorRows.filter(r => r.assessor?.id).map(r => [r.assessor!.id, r.assessor!.name || "غير محدد"]))
     ).map(([id, name]) => ({ id, name }))
+
+    // (إعادة تصميم سجل التقارير) أزواج الشواهد المتحققة + الخطط المرتبطة —
+    // من معرفات النطاق الفعلي كله (تضييق عبر assessmentId — علاقة قائمة فعلًا في المخطط)
+    const saScopeIds = saScopeRows.map(r => r.id)
+    const [saPairs, saPlans] = await Promise.all([
+      // التمييز على مستوى قاعدة البيانات (assessmentId+evidenceId) — نفس دلالة
+      // countDistinctVerifiedEvidence المعتمدة: تكرار الزيارة لنفس الشاهد لا يُعدّ مرتين
+      prisma.evidenceResponse.groupBy({
+        by: ["assessmentId", "evidenceId"],
+        where: { isVerified: true, assessmentId: { in: saScopeIds } },
+      }),
+      prisma.improvementPlan.findMany({
+        where: { assessmentId: { in: saScopeIds } },
+        select: { id: true, assessmentId: true, status: true, kind: true },
+      }),
+    ])
+    // أرقام الملخص — من الوحدة النقية المختبرة (نفس المعادلات المعتمدة بلا أي معادلة جديدة)
+    const saKpis = computeReportsLogKpis({
+      statuses: saScopeRows,
+      verifiedPairs: saPairs,
+      totalEvidence: saTotalEvidence,
+      linkedPlans: saPlans.length,
+    })
+
+    // صفوف القائمة — نفس بيانات الجدول القديم نفسها (بلا حذف أو اختصار)،
+    // ودرجة كل صف بنفس معادلة الصفحة المعتمدة حرفيًا
+    const saPlansByAssessment = new Map<string, { id: string; status: string; kind: string }>()
+    for (const p of saPlans) {
+      if (p.assessmentId) saPlansByAssessment.set(p.assessmentId, { id: p.id, status: p.status, kind: p.kind })
+    }
+    const saRows: ReportsLogRowData[] = saList.map(a => {
+      const verified = countDistinctVerifiedEvidence(a.evidenceResponses)
+      const score = saTotalEvidence > 0 ? Math.round((verified / saTotalEvidence) * 100) : 0
+      return {
+        id: a.id,
+        schoolName: a.school.name,
+        branchName: a.branch?.name ?? null,
+        assessorName: a.assessor?.name ?? null,
+        stageLabel: getStageLabel(a.stage),
+        hasStage: !!a.stage,
+        yearLabel: a.academicYear?.label ?? null,
+        dateLabel: formatDate(a.startedAt.toISOString()),
+        isCompleted: a.status === "COMPLETED",
+        score,
+        plan: saPlansByAssessment.get(a.id) ?? null,
+      }
+    })
+
+    // فلاتر فعّالة (شاملة stage وstatus وq) — تتحكم في إظهار «إعادة تعيين»
+    const saHasActiveFilters =
+      Object.keys(filterParams).length > 0 || filters.status !== undefined || !!filters.q
+    // فلاتر الرابط دون stage — تحفظها شرائح المرحلة في روابطها
+    // (إصلاح سلوكي: شرائح المرحلة القديمة كانت تُسقط بقية الفلاتر عند التنقل)
+    const qsForChips = new URLSearchParams(filtersQs)
+    qsForChips.delete("stage")
+    const filtersQsNoStage = qsForChips.toString()
 
     return (
       <div className="space-y-6">
@@ -321,14 +391,15 @@ export default async function ReportsPage({
           breadcrumbs={[{ label: 'الرئيسية', href: '/' }, { label: 'التقارير' }]}
         />
 
-        <StageFilterBar current={stageFilter} />
-
-        {/* (§3) شريط فلاتر سجل التقارير — مدير النظام: مدرسة + مقيّم + عام + فترة + حالة */}
-        <ReportFiltersBar
-          schools={schools.map(s => ({ id: s.id, name: s.name }))}
-          assessors={saAssessors}
-          years={saYears.map(y => ({ id: y.id, label: y.label }))}
+        {/* (إعادة تصميم سجل التقارير) القسم الأول: بحث + فلاتر + ملخص أرقام + قائمة متجاوبة
+            — نفس البيانات والإجراءات ونفس المعادلات المعتمدة بلا أي تغيير.
+            القسم التالي (مقارنة المدارس + التصدير الشامل) يبقى كما هو دون أي تعديل */}
+        <ReportsLogSection
+          kpis={saKpis}
+          totalEvidence={saTotalEvidence}
+          rows={saRows}
           stageParam={stageParam}
+          filtersQsNoStage={filtersQsNoStage}
           current={{
             schoolId: filters.schoolId,
             assessorId: filters.assessorId,
@@ -336,63 +407,13 @@ export default async function ReportsPage({
             from: filterParams.from,
             to: filterParams.to,
             status: filters.status,
+            q: filters.q,
           }}
+          hasActiveFilters={saHasActiveFilters}
+          schools={schools.map(s => ({ id: s.id, name: s.name }))}
+          assessors={saAssessors}
+          years={saYears.map(y => ({ id: y.id, label: y.label }))}
         />
-
-        {/* (§2+§3) سجل التقارير المطابقة للفلاتر — كل صف تقييم مستقل بمعرّفاته الكاملة
-            (المدرسة/الفرع/المقيّم/المرحلة/العام/التاريخ/الحالة/النتيجة) — بلا دمج بين السجلات */}
-        <Card className="overflow-hidden hidden md:block">
-          <CardContent className="p-0">
-            <div className="p-6 pb-0"><h3 className="font-bold">سجل التقارير المطابقة للفلاتر</h3>
-              <p className="text-[12px] text-muted-foreground mt-1">كل صف = تقييم واحد مستقل. النتيجة نسبة تحقق الشواهد لهذا التقييم وحده.</p></div>
-            <table className="w-full text-sm text-right min-w-[900px]">
-              <thead className="text-[12px] text-muted-foreground bg-surface-muted uppercase">
-                <tr>
-                  <th className="px-4 py-3 font-medium">المدرسة</th>
-                  <th className="px-4 py-3 font-medium">الفرع</th>
-                  <th className="px-4 py-3 font-medium">المقيّم</th>
-                  <th className="px-4 py-3 font-medium">المرحلة</th>
-                  <th className="px-4 py-3 font-medium">العام الدراسي</th>
-                  <th className="px-4 py-3 font-medium">التاريخ</th>
-                  <th className="px-4 py-3 font-medium">الحالة</th>
-                  <th className="px-4 py-3 font-medium">النتيجة</th>
-                  <th className="px-4 py-3 font-medium text-left">إجراء</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-border">
-                {saList.map(a => {
-                  const verified = countDistinctVerifiedEvidence(a.evidenceResponses)
-                  const score = saTotalEvidence > 0 ? Math.round((verified / saTotalEvidence) * 100) : 0
-                  return (
-                    <tr key={a.id} className="hover:bg-surface-muted/50">
-                      <td className="px-4 py-3 font-medium text-foreground-strong">{a.school.name}</td>
-                      <td className="px-4 py-3 text-muted-foreground">{a.branch?.name || "كامل المدرسة"}</td>
-                      <td className="px-4 py-3 text-muted-foreground">{a.assessor?.name ?? "غير محدد"}</td>
-                      <td className="px-4 py-3"><Badge variant={a.stage ? "info" : "neutral"}>{getStageLabel(a.stage)}</Badge></td>
-                      <td className="px-4 py-3 text-muted-foreground">{a.academicYear?.label ?? "غير محدد"}</td>
-                      <td className="px-4 py-3 text-muted-foreground numeric">{formatDate(a.startedAt.toISOString())}</td>
-                      <td className="px-4 py-3"><Badge variant={a.status === "COMPLETED" ? "success" : "warning"} dot>{a.status === "COMPLETED" ? "مكتمل" : "جاري"}</Badge></td>
-                      <td className="px-4 py-3">
-                        <div className="flex items-center gap-2">
-                          <Progress value={score} size="sm" className="w-16" tone={score === 100 ? "success" : "default"} />
-                          <span className="text-[12px] font-medium numeric">{score}%</span>
-                        </div>
-                      </td>
-                      <td className="px-4 py-3 text-left">
-                        <Link href={`/quality/assessments/${a.id}/results`}>
-                          <Button variant="ghost" size="sm">عرض</Button>
-                        </Link>
-                      </td>
-                    </tr>
-                  )
-                })}
-                {saList.length === 0 && (
-                  <tr><td colSpan={9} className="px-4 py-8 text-center text-muted-foreground">لا توجد تقييمات مطابقة للفلاتر المحددة.</td></tr>
-                )}
-              </tbody>
-            </table>
-          </CardContent>
-        </Card>
 
         {/* Desktop Table Layout */}
         <Card className="overflow-hidden hidden md:block">

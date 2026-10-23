@@ -1,4 +1,3 @@
-// ===== FILE: src/app/quality/assessments/[assessmentId]/results/page.tsx =====
 import { prisma } from "@/lib/prisma"
 import { getCurrentUser, assertAssessmentAccess, getStageEditPolicy } from "@/lib/permissions"
 import { redirect } from "next/navigation"
@@ -73,7 +72,12 @@ export default async function AssessmentResultsPage({ params }: { params: { asse
   })
 
   return (
-    <div className="space-y-6 lg:space-y-8">
+    // (إطار العرض على مستوى الصفحة) حزام أمان مستقل عن هيكل التطبيق:
+    // توسيط المحتوى بعرض أقصى 960px من داخل الصفحة نفسها، فتظهر بهوامش متوازنة
+    // حتى لو غاب غلاف العرض في AppShell لدى المستخدم (layout مسار /quality).
+    // وإذا وُجد الغلاف فالقيمتان متطابقتان (نطاق /quality/assessments = narrow
+    // 960px في content-width.ts) والتأثير صفري — لا تمدد مطلقًا ولا تكرار هوامش.
+    <div className="mx-auto w-full max-w-[1160px] space-y-6 lg:space-y-8">
       <PageHeader
         title="نتائج التقييم"
         description={`${assessment.school.name} — ${assessment.branch?.name ?? "كامل المدرسة"}`}

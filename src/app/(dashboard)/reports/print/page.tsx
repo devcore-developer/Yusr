@@ -8,7 +8,7 @@ import { getPerformanceLevel } from "@/lib/performance"
 import { getSchoolSurveyLinks } from "@/features/quality-assessment/services/survey-link"
 import { formatDate } from "@/lib/utils"
 import { getStageLabel, stageFilterToParam } from "@/lib/stages"
-import { resolveReportFilters } from "@/features/quality-reports/services/report-filters"
+import { resolveReportFilters, reportSearchCondition } from "@/features/quality-reports/services/report-filters"
 import { EvaluationCard } from "@/components/reports/EvaluationCard"
 import { ReportDetailsToggle } from "@/components/reports/ReportDetailsToggle"
 import { SurveyComparisonTable } from "@/components/reports/SurveyComparisonTable"
@@ -92,6 +92,9 @@ export default async function PrintReportPage({ searchParams }: { searchParams: 
         ...(dateFrom || dateTo
           ? [{ startedAt: { ...(dateFrom ? { gte: dateFrom } : {}), ...(dateTo ? { lt: dateTo } : {}) } }]
           : []),
+        // (جديد — إعادة تصميم سجل التقارير) البحث النصي — نفس شرط الوحدة المشتركة
+        // الذي يبني القائمة المفلترة كي يطابق التقرير المطبوع القائمة حرفيًا
+        ...(filters.q ? reportSearchCondition(filters.q) : []),
       ]
     },
     include: {
@@ -232,6 +235,10 @@ export default async function PrintReportPage({ searchParams }: { searchParams: 
                   )}
                   {filterAssessorContext && (
                     <p style={{ fontSize: "14px", color: "#2878B8", marginBottom: "4px" }}>المقيّم: {filterAssessorContext.name ?? "غير محدد"}</p>
+                  )}
+                  {/* (جديد) نطاق البحث النصي يُطبع بوضوح كي يطابق التقرير القائمة المفلترة */}
+                  {filters.q && (
+                    <p style={{ fontSize: "14px", color: "#2878B8", marginBottom: "4px" }}>البحث: «{filters.q}»</p>
                   )}
                   <p style={{ fontSize: "12px", color: "#64748B" }}>تاريخ التقرير: {new Date().toLocaleDateString("ar-SA")}</p>
                 </div>
