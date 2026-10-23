@@ -1,3 +1,4 @@
+// ===== FILE: src/app/(dashboard)/quality-assessor/assessments/[assessmentId]/page.tsx =====
 import { prisma } from "@/lib/prisma"
 import { getCurrentUser, assertAssessmentAccess, getStageEditPolicy } from "@/lib/permissions"
 import { redirect } from "next/navigation"
@@ -7,6 +8,7 @@ import { StageEditor } from "@/features/quality-assessment/components/StageEdito
 import { Badge } from "@/components/ui/Badge"
 import { Card, CardContent } from "@/components/ui/Card"
 import { getStageLabel } from "@/lib/stages"
+import { getIndicatorEvidenceScores } from "@/features/improvement-plans/queries"
 
 export default async function AssessmentPage({ params }: { params: { assessmentId: string } }) {
   const user = await getCurrentUser()
@@ -65,6 +67,18 @@ export default async function AssessmentPage({ params }: { params: { assessmentI
     if (g.indicatorId) surveyLinkCounts[g.indicatorId] = g._count._all
   }
 
+  // (Task 21 — إضافة فقط) الدرجات المرجعية للمؤشرات في هذا التقييم — من الخدمة
+  // القائمة getIndicatorEvidenceScores (نفس المنهجية التي يحسب بها الخادم الدرجة
+  // عند إنشاء الخطة فعليًا: المتحقق المميز ÷ شواهد المؤشر × 100، وبلا شواهد null)
+  // — للتوجيه البصري لأزرار الخطط في المحرك فقط؛ الخادم يعيد الحساب دائمًا
+  // عند الإنشاء ولا يقبل أي درجة من العميل.
+  const indicatorScoresMap = await getIndicatorEvidenceScores(assessment.id)
+  const indicatorScores: Record<string, number | null> = {}
+  // Array.from: توافقًا مع target أقدم من ES2015 (تكرار Map مباشرةً يرمي TS2802)
+  for (const [indicatorId, s] of Array.from(indicatorScoresMap)) {
+    indicatorScores[indicatorId] = s.percentage
+  }
+
   return (
     <div className="space-y-6">
       <PageHeader
@@ -100,6 +114,8 @@ export default async function AssessmentPage({ params }: { params: { assessmentI
         userRole={user.role}
         userId={user.id}
         surveyLinkCounts={surveyLinkCounts}
+        indicatorScores={indicatorScores}
+        canCreatePlan={user.role === "QUALITY_ASSESSOR" && assessment.assessorId === user.id}
       />
     </div>
   )

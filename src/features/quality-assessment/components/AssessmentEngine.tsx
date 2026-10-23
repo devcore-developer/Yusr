@@ -9,6 +9,7 @@ import { Progress } from "@/components/ui/Progress"
 import { Modal } from "@/components/ui/Modal"
 import { cn } from "@/lib/utils"
 import { saveEvidenceResponse, finishAssessment, uploadAttachment, deleteAttachment } from "../actions"
+import { EvidencePlanActions } from "@/components/improvement-plans/EvidencePlanActions"
 import {
   CheckCircle, Menu, X, ClipboardCheck, Building2,
   Loader2, Hash, Wrench, Calendar, ChevronDown,
@@ -27,6 +28,14 @@ interface AssessmentEngineProps {
   // (جديد، اختياري) عدد الاستبانات المرتبطة صراحةً بكل بند (indicatorId → العدد)
   // تُحسب على الخادم لكل المقيَّدات بنطاق المدرسة — غياب الخاصية = لا شارات ولا أي تغيير
   surveyLinkCounts?: Record<string, number>
+  // (Task 21 — إضافة فقط، اختياري) درجات المؤشر المرجعية لهذا التقييم
+  // (indicatorId → نسبة 0-100 أو null) من getIndicatorEvidenceScores — نفس
+  // منهجية الخادم في إنشاء الخطط؛ للتنويه البصري فقط والخادم يعيد الحساب دائمًا.
+  // غياب الخاصية = لا أزرار خطط ولا أي تغيير (توافق خلفي كامل).
+  indicatorScores?: Record<string, number | null>
+  // (Task 21 — إضافة فقط، اختياري) أزرار الخطط للمقيّم المالك فقط —
+  // نفس سلطة createEvidencePlan الخادمية بلا أي توسيع أدوار.
+  canCreatePlan?: boolean
 }
 
 const TOOLS = [
@@ -39,7 +48,7 @@ const TOOLS = [
   "مقابلة الموجه الطلابي"
 ]
 
-export function AssessmentEngine({ assessment, domains, initialEvidenceResponses, initialNotesResponses, initialAttachments, userRole, userId, surveyLinkCounts }: AssessmentEngineProps) {
+export function AssessmentEngine({ assessment, domains, initialEvidenceResponses, initialNotesResponses, initialAttachments, userRole, userId, surveyLinkCounts, indicatorScores, canCreatePlan }: AssessmentEngineProps) {
   const [activeTool, setActiveTool] = useState(TOOLS[0])
   const [activeVisit, setActiveVisit] = useState(1)
   const [responses, setResponses] = useState<Map<string, any>>(
@@ -176,6 +185,9 @@ export function AssessmentEngine({ assessment, domains, initialEvidenceResponses
   const progress = totalEvidence > 0 ? Math.round((verifiedCount / totalEvidence) * 100) : 0
 
   const handleFinish = async () => {
+    // (20-fix5) لا فحص مسبق للبقية هنا عمدًا: الخادم لم يعد يملك بوابة 100% —
+    // الإنهاء الجزئي مقصود (الفجوات تلتقط الشواهد غير المتحققة)، ونافذة التأكيد
+    // أعلاه تعرض «المتحقق/المتبقي» كمعلومة قبل قرار المالك.
     try {
       await finishAssessment(assessment.id)
       window.location.href = "/quality-assessor"
@@ -279,6 +291,20 @@ export function AssessmentEngine({ assessment, domains, initialEvidenceResponses
                           <BarChart2 className="w-3 h-3 shrink-0" />
                           مرتبطة بـ {(surveyLinkCounts?.[group.indicator.id] ?? 0)} استبانة مسجلة — عرض النتائج
                         </Link>
+                      )}
+                      {/* (Task 21 — إضافة فقط) زر الخطة من سياق الشاهد: استدامة (≥90) أو تحسين (<90)
+                          بدرجة المؤشر المرجعية من هذا التقييم — نفس المكوّن ومسار خطط التحسين
+                          القائم، والخادم يعيد حساب الدرجة ويفرض الحد عند الإنشاء الفعلي.
+                          زر واحد لكل مجموعة مؤشر (وليس لكل صف شاهد) كما في توثيق المكوّن. */}
+                      {canCreatePlan && (
+                        <div className="mt-2">
+                          <EvidencePlanActions
+                            indicatorId={group.indicator.id}
+                            assessmentId={assessment.id}
+                            score={indicatorScores?.[group.indicator.id] ?? null}
+                            canCreatePlan={canCreatePlan}
+                          />
+                        </div>
                       )}
                     </div>
 

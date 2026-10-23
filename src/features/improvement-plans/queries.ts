@@ -1,12 +1,21 @@
 // ===== FILE: src/features/improvement-plans/queries.ts =====
 import { prisma } from "@/lib/prisma"
 import { SUSTAINABILITY_THRESHOLD as _SUSTAINABILITY_THRESHOLD } from "./threshold"
+import { percentageFromCounts, buildIndicatorEvidenceScores, type IndicatorEvidenceScore } from "./score"
 
 /**
- * حد إنشاء خطة الاستدامة — معرَّف في ./threshold (مصدر واحد) ويُعاد تصديره هنا
+ * حد إنشاء خطة الاستدامة — معرّف في ./threshold (مصدر واحد) ويُعاد تصديره هنا
  * لمستهلكي الخادم. لا تعدّل القيمة إلا في threshold.ts.
  */
 export const SUSTAINABILITY_THRESHOLD = _SUSTAINABILITY_THRESHOLD
+
+/**
+ * (Task 21) الطبقة النقية لدرجات الشواهد تُعرَّف في ./score (نقية بلا prisma —
+ * قابلة للاختبار الآلي مباشرة) وتُعاد تصديرها هنا ليبقى مسار الاستيراد القائم
+ * (queries) صالحًا لأي مستهلك دون أي تغيير.
+ */
+export { percentageFromCounts, buildIndicatorEvidenceScores } from "./score"
+export type { IndicatorEvidenceScore } from "./score"
 
 /**
  * ============================================================
@@ -24,16 +33,6 @@ export const SUSTAINABILITY_THRESHOLD = _SUSTAINABILITY_THRESHOLD
  * قاعدة الحد 90%: مطابقة لحد «ممتاز» في getPerformanceBand (90/75/50) —
  * مصدر واحد للحقيقة هنا حتى لا تتفرق القيمة بين الصفحات والإجراءات.
  */
-
-export interface IndicatorEvidenceScore {
-  indicatorId: string
-  /** عدد الشواهد المميزة المتحققة (distinct evidenceId — صف الزيارة الإضافي لنفس الشاهد لا يضاعفه) */
-  verifiedCount: number
-  /** إجمالي الشواهد الثابتة للمؤشر */
-  totalEvidence: number
-  /** النسبة 0-100، أو null إذا لم يكن للمؤشر شواهد (لا تُختلع درجة) */
-  percentage: number | null
-}
 
 /**
  * درجة مؤشر واحد داخل تقييم واحد — يُستدعى من الخادم حصرًا (إجراء الإنشاء).
@@ -60,7 +59,7 @@ export async function computeIndicatorEvidenceScore(
   })
   const verifiedCount = verifiedRows.length
 
-  return Math.round((verifiedCount / totalEvidence) * 100)
+  return percentageFromCounts(verifiedCount, totalEvidence)
 }
 
 /**
@@ -79,39 +78,7 @@ export async function getIndicatorEvidenceScores(
     }),
   ])
 
-  const evidenceIndicator = new Map(bank.map((e) => [e.id, e.indicatorId]))
-
-  const totals = new Map<string, number>()
-  for (const e of bank) {
-    totals.set(e.indicatorId, (totals.get(e.indicatorId) ?? 0) + 1)
-  }
-
-  // (إصلاح التضخم) تفريد معرفات الشواهد أولاً — صف زيارة إضافي لنفس الشاهد
-  // (visitNumber 1..7) لا يُعدّ شاهدًا جديدًا
-  const verifiedEvidenceIds = Array.from(new Set(verifiedResponses.map((r) => r.evidenceId)))
-
-  const verified = new Map<string, number>()
-  for (const evidenceId of verifiedEvidenceIds) {
-    const indicatorId = evidenceIndicator.get(evidenceId)
-    if (indicatorId) {
-      verified.set(indicatorId, (verified.get(indicatorId) ?? 0) + 1)
-    }
-  }
-
-  const result = new Map<string, IndicatorEvidenceScore>()
-  // Array.from: التكرار فوق مصفوفة يترجم سليمًا مع target أقدم من ES2015 دون
-  // downlevelIteration (تكرار Map مباشرةً يرمي TS2802) — نفس الترتيب والدلالة
-  for (const [indicatorId, totalEvidence] of Array.from(totals)) {
-    const verifiedCount = verified.get(indicatorId) ?? 0
-    result.set(indicatorId, {
-      indicatorId,
-      verifiedCount,
-      totalEvidence,
-      percentage: Math.round((verifiedCount / totalEvidence) * 100),
-    })
-  }
-
-  return result
+  return buildIndicatorEvidenceScores(bank, verifiedResponses)
 }
 
 /**

@@ -109,31 +109,18 @@ export async function finishAssessment(assessmentId: string) {
   if (user.role === "SCHOOL_MANAGER" && assessment.schoolId !== user.schoolId) throw new Error("Forbidden")
   if (user.role === "BRANCH_MANAGER" && assessment.branchId !== user.branchId) throw new Error("Forbidden")
 
-  // فحص الاكتمال قبل الإنهاء — بنفس وحدات ومصدر نسبة التقدم المعروضة للمقيّم:
-  // إجمالي شواهد النموذج الثابت مقابل الشواهد المتحققة في هذا التقييم
-  // (نفس المعادلة المستخدمة في saveEvidenceResponse والتقارير والتحليلات وحلقة
-  //  التقدم في الواجهة — كي يتطابق «100% في الشاشة» مع سماح الخادم بالإنهاء).
-  // (سابقًا: كان يقارن عدد المؤشرات «مغطى» في كل قاعدة البيانات مع عدد صفوف
-  //  الاستجابات لهذا التقييم — وحدتان ونطاقان مختلفان، وقد يستحيل معه الإنهاء
-  //  نهائيًا إن وُجد مؤشر «مغطى» بلا شواهد في النموذج الثابت.)
-  const totalEvidence = await prisma.fixedEvidence.count()
-  // (إصلاح التضخم) نفس عدّاد التقدم المعروض: شواهد مميزة متحققة — لا صفوف زيارات
-  const verifiedRows = await prisma.evidenceResponse.findMany({
-    where: { assessmentId, isVerified: true },
-    select: { evidenceId: true },
-    distinct: ["evidenceId"],
-  })
-  const verifiedEvidence = verifiedRows.length
-
-  if (totalEvidence > 0 && verifiedEvidence < totalEvidence) {
-    const remaining = totalEvidence - verifiedEvidence
-    const remainingLabel =
-      remaining === 1 ? "شاهد واحد" :
-      remaining === 2 ? "شاهدان" :
-      remaining <= 10 ? `${remaining} شواهد` :
-      `${remaining} شاهدًا`
-    throw new Error(`لا يمكن الإنهاء: تبقّى ${remainingLabel} لم يتم التحقق منه. أكمل التحقق من جميع الشواهد ثم أعد المحاولة.`)
-  }
+  // (قرار منتج موثق — 20-fix5) الإنهاء الجزئي مقصود: لا بوابة إنهاء هنا عمدًا.
+  // بوابة «100% من بنك الشواهد» (أُضيفت في 19-e) ثبت من طرفية المالك أنها تجعل
+  // الإنهاء عمليًا مستحيلًا: البنك كله 631 شاهدًا مقابل 64 متحققًا في التقييم
+  // cmvk85f5g0005o3w6wxy1b74o فترمي «تبقّى 567 شاهدًا» — والبوابة الوحيدة التي
+  // كان يمكن لكل تقييم اجتيازها هي التحقق من كل شواهد القاعدة في كل تقييم.
+  // الأسوأ: نفس الدالة أدناه تُنشئ فجوات «مؤشر لم يثبت تحققه» لكل شاهد غير
+  // متحقق عند الإنهاء — أي أنها مصممة أصلًا للإنهاء الجزئي، والبوابة 100%
+  // تجعل هذا المسار كودًا ميتًا لا يُبلغ أبدًا. نافذة التأكيد في المحرك تعرض
+  // «المتحقق/المتبقي» قبل قرار المالك، والدرجة في التقارير والتحليلات تُحسب
+  // ديناميكيًا (المتحقق ÷ إجمالي الشواهد) فلا يكسب التقييم الجزئي نسبة كاملة.
+  // عقب 19-e كان هناك فحص: fixedEvidence.count() عالميًا مقابل شواهد التقييم —
+  // حُذف لكسر هذا الجمود، وكل ما عداه (الحالة، الفجوات، النشاط) كما هو.
 
   await prisma.assessment.update({
     where: { id: assessmentId },
