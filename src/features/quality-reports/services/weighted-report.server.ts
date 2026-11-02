@@ -1,4 +1,3 @@
-// ===== FILE: src/features/quality-reports/services/weighted-report.server.ts =====
 // ============================================================
 // Weighted report data loader — guarded, server-only
 // ============================================================
@@ -152,7 +151,7 @@ export async function getWeightedCardData(
     }
   })
   // deterministic order: known stages first (platform order), then unspecified
-  const STAGE_ORDER = ["KINDERGARTEN", "PRIMARY", "INTERMEDIATE", "SECONDARY", "SPECIAL_EDUCATION"]
+  const STAGE_ORDER = ["KINDERGARTEN", "PRIMARY", "INTERMEDIATE", "SECONDARY", "SPECIAL_EDUCATION", "INTERNATIONAL_SECTION"]
   stagePanels.sort((a, b) => {
     const ia = a.stage ? STAGE_ORDER.indexOf(a.stage) : STAGE_ORDER.length
     const ib = b.stage ? STAGE_ORDER.indexOf(b.stage) : STAGE_ORDER.length

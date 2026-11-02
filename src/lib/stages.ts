@@ -1,4 +1,3 @@
-// ===== FILE: src/lib/stages.ts =====
 // ============================================================
 // المراحل التعليمية — المصدر الموحد للمعرفات والتسميات والتحقق
 // (يدخل ضمن ميزة المراحل التعليمية — لا يغير أي منهجية حساب قائمة)
@@ -12,6 +11,7 @@ export const EDUCATIONAL_STAGES = [
   { id: "INTERMEDIATE", ar: "متوسط", en: "Intermediate" },
   { id: "SECONDARY", ar: "ثانوي", en: "Secondary" },
   { id: "SPECIAL_EDUCATION", ar: "تربية خاصة", en: "Special Education" },
+  { id: "INTERNATIONAL_SECTION", ar: "القسم الدولي", en: "International Section" },
 ] as const
 
 export type EducationalStageId = (typeof EDUCATIONAL_STAGES)[number]["id"]

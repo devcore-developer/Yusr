@@ -1,4 +1,3 @@
-// ===== FILE: src/app/(dashboard)/settings/page.tsx =====
 import { prisma } from "@/lib/prisma"
 import { getCurrentUser } from "@/lib/permissions"
 import { redirect } from "next/navigation"
@@ -85,7 +84,7 @@ export default async function SettingsPage() {
         <CardContent>
           {stageUnlimited ? (
             <p className="text-sm text-muted-foreground">
-              حسابك غير مقيّد بمراحل محددة — يمكنك العمل في جميع المراحل التعليمية الخمس.
+              حسابك غير مقيّد بمراحل محددة — يمكنك العمل في جميع المراحل التعليمية.
             </p>
           ) : isAssessor ? (
             /* (جديد) محرّر قابل للحفظ — يخزن في قاعدة البيانات ويظهر فورًا بعد التحديث */

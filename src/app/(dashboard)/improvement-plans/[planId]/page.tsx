@@ -1,4 +1,3 @@
-// ===== FILE: src/app/(dashboard)/improvement-plans/[planId]/page.tsx =====
 import { prisma } from "@/lib/prisma"
 import { getCurrentUser, getAuthorizedBranchIds } from "@/lib/permissions"
 import { redirect } from "next/navigation"
@@ -112,9 +111,9 @@ export default async function ViewImprovementPlanPage({ params }: { params: { pl
               <p className="text-xs text-muted-foreground">المؤشر المرتبط</p>
               <p className="text-sm font-medium">
                 {plan.gap?.indicator
-                  ? `${plan.gap.indicator.code} - ${plan.gap.indicator.description}`
+                  ? plan.gap.indicator.description || "غير محدد"
                   : linkedIndicator
-                    ? `${linkedIndicator.code} - ${linkedIndicator.description}`
+                    ? linkedIndicator.description || "غير محدد"
                     : "غير محدد"}
               </p>
             </div>

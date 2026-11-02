@@ -213,12 +213,7 @@ export default async function SchoolManagerDashboard() {
         <StatCard label="الفروع" value={branchesCount} icon={<Building2 className="w-5 h-5" />} tone="info" context={`${branchesCount} فرع نشط`} />
         <StatCard label="المستخدمون" value={usersCount} icon={<Users className="w-5 h-5" />} tone="violet" context={`${usersCount} مستخدم مسجل`} />
         <StatCard label="تقييمات مؤهلة" value={perf.eligibleAssessments} icon={<ClipboardCheck className="w-5 h-5" />} tone="amber" status={{ label: `${perf.completedAssessments} مكتمل`, tone: 'success' }} />
-        <StatCard 
-          label="الأداء الإجمالي للمدرسة" 
-          value={perf.provisionalPercentage !== null ? `${perf.provisionalPercentage}%` : "—"} 
-          icon={<TrendingUp className="w-5 h-5" />} 
-          tone="success" 
-        />
+        <StatCard label="الفجوات المفتوحة" value={openGaps} icon={<AlertTriangle className="w-5 h-5" />} tone="danger" />
       </div>
 
       <Card className="p-6">

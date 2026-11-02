@@ -1,4 +1,3 @@
-// ===== FILE: src/components/reports/WeightedEvaluationSection.tsx =====
 // ============================================================
 // WeightedEvaluationSection — additive on-screen evaluation card
 // ============================================================
@@ -52,12 +51,17 @@ export async function WeightedEvaluationSection({
 
   return (
     <div className="space-y-6">
-      <EvaluationCard
-        overall={data.overall}
-        classification={data.classification}
-        domainResults={data.domains}
-        notRatedReason={buildNotRatedReason(data.diagnostics)}
-      />
+      {/* (التحسين 4) بطاقة النتيجة المرجحة تظهر فقط حين يكون النطاق مقصوصًا على مرحلة
+          بعينها (stageFilter محدد حتى «غير محددة») — في العرض الجامع عبر المراحل لا تُعرض
+          نسبة كلية مجمعة تخلط تقارير مستقلة، وتُعرض نتائج كل مرحلة في لوحتها المستقلة أدناه */}
+      {stageFilter !== undefined && (
+        <EvaluationCard
+          overall={data.overall}
+          classification={data.classification}
+          domainResults={data.domains}
+          notRatedReason={buildNotRatedReason(data.diagnostics)}
+        />
+      )}
 
       {/* Stage panels — only stages that exist in scope (§5: dynamic, no empty panels) */}
       {data.stagePanels.length > 0 && (

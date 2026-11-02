@@ -1,4 +1,3 @@
-// ===== FILE: src/app/(dashboard)/reports/page.tsx =====
 import { prisma } from "@/lib/prisma"
 import { getCurrentUser } from "@/lib/permissions"
 import { redirect } from "next/navigation"
@@ -591,7 +590,10 @@ export default async function ReportsPage({
           printHref={`/reports/print?scope=single&schoolId=${branch.school.id}&branchId=${branch.id}${filtersQsSuffix}`}
         />
 
-        {/* Overall Branch Performance */}
+        {/* Overall Branch Performance — (التحسين 4) تُعرض فقط مع فلتر مرحلة نشط:
+            حينها هي نسبة هذا الفرع في هذه المرحلة وحدها (تقرير مستقل بنسبته الخاصة)،
+            وفي العرض الجامع عبر المراحل لا تُعرض نسبة كلية مجمعة */}
+        {stageFilter !== undefined && (
         <Card className="p-8 text-center bg-primary text-white shadow-premium">
           <h2 className="text-lg font-bold mb-4 text-white">النسبة الإجمالية لأداء الفرع</h2>
           {perf.percentage !== null ? (
@@ -610,6 +612,7 @@ export default async function ReportsPage({
             </>
           )}
         </Card>
+        )}
 
         {/* Multi-Evaluator Breakdown - Desktop */}
         {perf.evaluators.length > 0 && (
@@ -709,6 +712,12 @@ export default async function ReportsPage({
                         <Link href={`/quality/assessments/${a.id}/results`}>
                           <Button variant="ghost" size="sm">عرض</Button>
                         </Link>
+                        {/* (التحسين 5) طباعة هذا التقييم وحده */}
+                        {a.status === "COMPLETED" && (
+                          <Link href={`/reports/print?assessmentId=${a.id}`} target="_blank">
+                            <Button variant="ghost" size="sm">طباعة</Button>
+                          </Link>
+                        )}
                       </div>
                     </div>
                   )
@@ -821,6 +830,9 @@ export default async function ReportsPage({
           printHref={`/reports/print?scope=single&schoolId=${school.id}${filtersQsSuffix}`}
         />
 
+        {/* (التحسين 4) تُعرض فقط مع فلتر مرحلة نشط — تقرير المدرسة لهذه المرحلة بنسبتها
+            الخاصة؛ في العرض الجامع عبر المراحل والفروع لا تُعرض نسبة كلية مجمعة */}
+        {stageFilter !== undefined && (
         <Card className="p-8 text-center bg-primary text-white shadow-premium">
           <h2 className="text-lg font-bold mb-4 text-white">النسبة الإجمالية للأداء</h2>
           {perf.percentage !== null ? (
@@ -839,6 +851,7 @@ export default async function ReportsPage({
             </>
           )}
         </Card>
+        )}
 
         {/* Multi-Evaluator Breakdown - Desktop */}
         {perf.evaluators.length > 0 && (
@@ -927,6 +940,12 @@ export default async function ReportsPage({
                         <Link href={`/quality/assessments/${a.id}/results`}>
                           <Button variant="outline" size="sm">عرض</Button>
                         </Link>
+                        {/* (التحسين 5) طباعة هذا التقييم وحده */}
+                        {a.status === "COMPLETED" && (
+                          <Link href={`/reports/print?assessmentId=${a.id}`} target="_blank">
+                            <Button variant="outline" size="sm">طباعة</Button>
+                          </Link>
+                        )}
                       </div>
                     </div>
                   )
@@ -1056,6 +1075,12 @@ export default async function ReportsPage({
                     <Link href={`/quality-assessor/assessments/${a.id}`}>
                       <Button variant="outline" size="sm">عرض التقييم</Button>
                     </Link>
+                    {/* (التحسين 5) طباعة هذا التقييم وحده */}
+                    {a.status === "COMPLETED" && (
+                      <Link href={`/reports/print?assessmentId=${a.id}`} target="_blank">
+                        <Button variant="outline" size="sm">طباعة</Button>
+                      </Link>
+                    )}
                   </div>
                 </div>
               ))}

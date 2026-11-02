@@ -1,4 +1,3 @@
-// ===== FILE: src/app/(dashboard)/settings/actions.ts =====
 "use server"
 
 import { prisma } from "@/lib/prisma"
@@ -86,7 +85,7 @@ export async function createBackup() {
 
    قواعد الأمان:
    - QUALITY_ASSESSOR على حسابه هو حصرًا (لا يقبل userId من العميل إطلاقًا).
-   - القيم تُطبَّع وتُتحقق على الخادم عبر normalizeStageIds (المراحل الخمس فقط —
+   - القيم تُطبَّع وتُتحقق على الخادم عبر normalizeStageIds (المراحل المعرفة في EDUCATIONAL_STAGES فقط —
      أي قيمة أخرى تُرفض برسالة واضحة) — لا ثقة بالعميل أبدًا.
    - نطاق مقيّم الجودة صارم دائمًا (getUserStageGrant): اختيار المراحل من حسابه
      لا يمنحه أي صلاحية إضافية — يحدد فقط المراحل التي يُسمح له بإنشاء تقييماتها.

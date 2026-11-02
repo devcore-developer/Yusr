@@ -7,6 +7,7 @@ import { Badge, StatusBadge, PriorityBadge } from "@/components/ui/Badge"
 import { Progress } from "@/components/ui/Progress"
 import { Button } from "@/components/ui/Button"
 import { PlanWorkspace } from "@/features/improvement-plans/components/PlanWorkspace"
+import { getIndicatorLabels } from "@/features/improvement-plans/queries"
 import Link from "next/link"
 import { formatDate } from "@/lib/utils"
 import { Printer, Pencil } from "lucide-react"
@@ -32,15 +33,21 @@ export default async function PlanDetailsPage({ params }: { params: { planId: st
   }
 
   const planData = plan as any
-  // جلب كود المؤشر من علاقة الفجوة (gap) بدلاً من علاقة مباشرة غير موجودة
-  const indicatorCode = planData.gap?.indicator?.code || "غير محدد"
+  // جلب المؤشر المرتبط من علاقة الفجوة (gap) — يُعرض وصفه المقروء فقط
+  // (التحسين 3: أكواد المؤشرات لا تُعرض في واجهة الخطط — العلاقة في القاعدة سليمة)
+  const linkedIndicator = !planData.gap?.indicator && planData.indicatorId
+    ? (await getIndicatorLabels([planData.indicatorId])).get(planData.indicatorId)
+    : undefined
+  const indicatorDescription = planData.gap?.indicator?.description || linkedIndicator?.description || null
   const isOverdue = new Date() > planData.targetDate && planData.status !== "COMPLETED"
+  // Task 16 (إضافة فقط): تسمية نوع الخطة — خطط التحسين القائمة تظهر بنفس النص السابق حرفيًا
+  const planKindLabel = planData.kind === "SUSTAINABILITY" ? "خطة استدامة" : "خطة تحسين"
 
   return (
     <div className="space-y-6">
       <PageHeader
         title={planData.title}
-        description={`خطة تحسين مرتبطة بالمؤشر: ${indicatorCode}`}
+        description={indicatorDescription ? `${planKindLabel} — ${indicatorDescription}` : planKindLabel}
         breadcrumbs={[
           { label: "الرئيسية", href: "/school-manager" },
           { label: "خطط التحسين", href: "/school-manager/quality/improvement-plans" },
@@ -64,6 +71,7 @@ export default async function PlanDetailsPage({ params }: { params: { planId: st
           <div className="flex justify-between items-center">
             <CardTitle>تفاصيل الخطة</CardTitle>
             <div className="flex gap-2">
+              {planData.kind === "SUSTAINABILITY" && <Badge variant="info">خطة استدامة</Badge>}
               <PriorityBadge priority={planData.priority} />
               {isOverdue && planData.status !== "COMPLETED" ? (
                 <Badge variant="danger" dot>متأخر</Badge>
@@ -82,6 +90,13 @@ export default async function PlanDetailsPage({ params }: { params: { planId: st
             <p className="text-xs text-muted-foreground">تاريخ الانتهاء المستهدف</p>
             <p className={`text-sm font-medium ${isOverdue ? "text-danger" : ""}`}>{formatDate(planData.targetDate.toISOString())}</p>
           </div>
+          {/* Task 16 (إضافة فقط): الدرجة المرجعية لحظة الإنشاء — تظهر فقط عند توفرها (لا تُختلع) */}
+          {planData.evidenceScore !== null && planData.evidenceScore !== undefined && (
+            <div className="space-y-1">
+              <p className="text-xs text-muted-foreground">الدرجة المرجعية عند الإنشاء</p>
+              <p className="text-sm font-medium numeric">{planData.evidenceScore}%</p>
+            </div>
+          )}
           <div className="space-y-1 md:col-span-2">
             <p className="text-xs text-muted-foreground">نسبة الإنجاز الإجمالية</p>
             <div className="flex items-center gap-3">

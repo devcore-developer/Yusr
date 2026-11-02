@@ -1,4 +1,3 @@
-// ===== FILE: src/components/admin/EditUserModal.tsx =====
 "use client"
 
 // ============================================================
@@ -131,7 +130,7 @@ export function EditUserModal({ user, currentUserRole }: EditUserModalProps) {
             <StageChecklist defaultSelected={(user.stages ?? []) as string[]} />
           ) : (
             <p className="text-[12px] text-muted-foreground bg-surface-muted rounded-lg p-3">
-              حسابات {selectedRole === "SUPER_ADMIN" ? "مدير النظام" : selectedRole === "SCHOOL_MANAGER" ? "المدير العام" : "هذا الدور"} غير مقيّدة بمراحل محددة — تعمل في جميع المراحل التعليمية الخمس.
+              حسابات {selectedRole === "SUPER_ADMIN" ? "مدير النظام" : selectedRole === "SCHOOL_MANAGER" ? "المدير العام" : "هذا الدور"} غير مقيّدة بمراحل محددة — تعمل في جميع المراحل التعليمية.
             </p>
           )}
 

@@ -1,4 +1,3 @@
-// ===== FILE: src/app/(dashboard)/reports/print/page.tsx =====
 import { prisma } from "@/lib/prisma"
 import { getCurrentUser, getAuthorizedBranchIds } from "@/lib/permissions"
 import { redirect } from "next/navigation"
@@ -35,7 +34,7 @@ import {
 // 4) نتائج الاستبانات تُعرض على مستوى المدرسة كما خُزنت (ولا تدخل في أي حساب).
 // ============================================================
 
-export default async function PrintReportPage({ searchParams }: { searchParams: { scope: string, schoolId?: string, branchId?: string, evaluatorId?: string, assessorId?: string, stage?: string, year?: string, from?: string, to?: string } }) {
+export default async function PrintReportPage({ searchParams }: { searchParams: { scope: string, schoolId?: string, branchId?: string, evaluatorId?: string, assessorId?: string, assessmentId?: string, stage?: string, year?: string, from?: string, to?: string } }) {
   const user = await getCurrentUser()
   if (!user) redirect("/login")
 
@@ -66,6 +65,9 @@ export default async function PrintReportPage({ searchParams }: { searchParams: 
   const paramBranchId = searchParams.branchId || null
   // معرّف المقيّم: evaluatorId (المعرف القديم) أو assessorId (معامل الفلاتر الموحد)
   const paramEvaluatorId = searchParams.evaluatorId || searchParams.assessorId || null
+  // (التحسين 5) طباعة تقييم واحد مستقل — يضيّق النطاق على هذا التقييم حصرًا
+  // (مدمج AND مع نطاق الدور فلا يمكن أن يوسّعه أو يعرض تقييمًا غير مصرح به)
+  const paramAssessmentId = searchParams.assessmentId || null
 
   // (§6) فلتر المرحلة + (§3) باقي فلاتر السجل (العام/الفترة) — undefined = بلا فلتر،
   // null = السجلات التاريخية غير المحددة، قيمة = محددة. تُدمج AND مع نطاق الدور ولا يوسعه.
@@ -85,6 +87,7 @@ export default async function PrintReportPage({ searchParams }: { searchParams: 
         ...(paramSchoolId ? [{ schoolId: paramSchoolId }] : []),
         ...(paramBranchId ? [{ branchId: paramBranchId }] : []),
         ...(paramEvaluatorId ? [{ assessorId: paramEvaluatorId }] : []),
+        ...(paramAssessmentId ? [{ id: paramAssessmentId }] : []),
         ...(stageFilter !== undefined ? [{ stage: stageFilter }] : []),
         // (§3) فلتر العام الدراسي (العلاقة المخزنة) — السجلات بلا عام تُطابق بفلتر «غير محدد» فقط
         ...(yearFilter !== undefined ? [{ academicYearId: yearFilter }] : []),
@@ -157,6 +160,11 @@ export default async function PrintReportPage({ searchParams }: { searchParams: 
     linkedSurveysBySchool.set(sid, await getSchoolLinkedSurveysByIndicator(sid))
     surveyConfigBySchool.set(sid, await getSurveyIntegrationConfig(sid))
   }
+
+  // (التحسين 4) عدّاد الترويسة يُعرض فقط حين يكون التقرير مقصوصًا على نطاق واحد
+  // (مرحلة بعينها أو فرع بعينه) — في العرض الجامع عبر المراحل/الفروع لا تُعرض
+  // نسبة كلية مجمعة تخلط تقارير مستقلة، وتبقى نتائج كل مرحلة/تقييم مطبوعة كما هي
+  const printReportScoped = stageFilter !== undefined || !!paramBranchId
 
   return (
     <div className="bg-white text-black p-4 md:p-8 lg:p-12 min-w-0" dir="rtl">
@@ -243,12 +251,14 @@ export default async function PrintReportPage({ searchParams }: { searchParams: 
                   <p style={{ fontSize: "12px", color: "#64748B" }}>تاريخ التقرير: {new Date().toLocaleDateString("ar-SA")}</p>
                 </div>
               </div>
-              <div style={{ textAlign: "center", flexShrink: 0 }}>
-                <SemiCircleGauge percentage={schoolAvg ?? 0} size={120} />
-                <p style={{ fontSize: "11px", color: "#64748B", marginTop: "4px" }}>
-                  متوسط نسب التقييمات المكتملة{schoolAvg !== null ? ` (${schoolAvg}%)` : ""}
-                </p>
-              </div>
+              {printReportScoped && (
+                <div style={{ textAlign: "center", flexShrink: 0 }}>
+                  <SemiCircleGauge percentage={schoolAvg ?? 0} size={120} />
+                  <p style={{ fontSize: "11px", color: "#64748B", marginTop: "4px" }}>
+                    متوسط نسب التقييمات المكتملة{schoolAvg !== null ? ` (${schoolAvg}%)` : ""}
+                  </p>
+                </div>
+              )}
             </div>
 
             <p style={{ fontSize: "13px", color: "#172B36", marginBottom: "8px", fontWeight: 600 }}>

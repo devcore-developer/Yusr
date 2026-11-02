@@ -1,7 +1,3 @@
-// ===== FILE: src/features/improvement-plans/actions.ts =====
-// (معدّل — التغييرات في createEvidencePlan حصرًا: استيراد + نوع النتيجة
-//  + منع التكرار + تخزين assessmentId + status؛ كل الدوال الأخرى حرفيًا)
-
 "use server"
 
 import { prisma } from "@/lib/prisma"
@@ -323,7 +319,9 @@ export async function createEvidencePlan(formData: FormData): Promise<CreateEvid
     }
   }
 
-  const title = submittedTitle || (kind === "SUSTAINABILITY" ? `خطة استدامة — مؤشر ${indicator.code}` : `خطة تحسين — مؤشر ${indicator.code}`)
+  // (التحسين 3) العنوان الافتراضي بلا كود المؤشر — الأكواد لا تُعرض لمستخدمي الخطط،
+  // والوصف المخزن هو الهوية المقروءة. العناوين المحفوظة لخطط قائمة تبقى كما هي.
+  const title = submittedTitle || (kind === "SUSTAINABILITY" ? `خطة استدامة — ${indicator.description || "مؤشر تقويمي"}` : `خطة تحسين — ${indicator.description || "مؤشر تقويمي"}`)
 
   // الحقول تُملأ من بيانات مخزنة قائمة فقط (كود/وصف/حالة مستهدفة للمؤشر) — لا محتوى مختلق.
   // targetDate: قيمة ابتدائية محايدة (سنة من اليوم) لأنه حقل إلزامي في الموديل،

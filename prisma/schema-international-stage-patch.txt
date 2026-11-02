@@ -1,0 +1,26 @@
+// ============================================================
+// patch: إضافة مرحلة «القسم الدولي» (INTERNATIONAL_SECTION)
+// ============================================================
+// (1) داخل enum EducationalStage في prisma/schema.prisma — أضف السطر:
+//       INTERNATIONAL_SECTION
+//     (تمت إضافته بعد SPECIAL_EDUCATION — الترتيب داخل الـ enum شكلي،
+//      وترتيب العرض في الواجهة يأتي من EDUCATIONAL_STAGES في src/lib/stages.ts)
+//
+// (2) داخل src/lib/stages.ts — أُضيف الصف:
+//       { id: "INTERNATIONAL_SECTION", ar: "القسم الدولي", en: "International Section" }
+//     (كل واجهات اختيار المراحل وفلاتر التقارير تقرأ من هذه المصفوفة تلقائيًا)
+//
+// (3) داخل src/features/quality-reports/services/weighted-report.server.ts —
+//     أُضيف المعرّف إلى STAGE_ORDER (ترتيب لوحات المراحل في التقارير).
+//
+// خطوات التنفيذ بالترتيب (مهم — طبّق الـ schema قبل استبدال ملفات الكود):
+//   npx prisma migrate dev --create-only --name add_international_section
+//   npx prisma migrate dev
+//   npx prisma generate
+//   ثم شغّل التطبيق كالمعتاد.
+//
+// أثر الأمان: ADD VALUE على نوع قائم فقط — لا حذف ولا إعادة بناء جداول،
+//             ولا backfill؛ السجلات التاريخية تبقى NULL («غير محددة»)
+//             والمراحل الخمس القائمة بمعرفاتها وقيمها دون أي تغيير.
+// SQL الكامل: prisma/migrations-add-international-stage/migration.sql
+// ============================================================

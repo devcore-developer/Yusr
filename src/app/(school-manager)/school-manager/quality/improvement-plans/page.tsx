@@ -1,4 +1,3 @@
-// ===== FILE: src/app/(school-manager)/school-manager/quality/improvement-plans/page.tsx =====
 import { prisma } from "@/lib/prisma"
 import { getCurrentUser } from "@/lib/permissions"
 import { PageHeader } from "@/components/layout/PageHeader"
@@ -10,7 +9,6 @@ import { EmptyState } from "@/components/ui/EmptyState"
 import { Plus, FileText, AlertCircle, Eye, Printer } from "lucide-react"
 import Link from "next/link"
 import { formatDate } from "@/lib/utils"
-import { getIndicatorLabels } from "@/features/improvement-plans/queries"
 
 export default async function ImprovementPlansPage() {
   const user = await getCurrentUser()
@@ -26,9 +24,6 @@ export default async function ImprovementPlansPage() {
     include: { branch: true, gap: { include: { indicator: true } } },
     orderBy: { createdAt: "desc" },
   })
-
-  // Task 16 (إضافة فقط): أكواد المؤشرات للخطط المرتبطة بمؤشر بلا فجوة — لا يغيّر استعلام الخطط القائم
-  const indicatorLabels = await getIndicatorLabels(plans.map(p => p.indicatorId).filter((v): v is string => Boolean(v)))
 
   const activeCount = plans.filter(p => p.status === "ACTIVE" || p.status === "IN_PROGRESS").length
   const completedCount = plans.filter(p => p.status === "COMPLETED").length
@@ -111,8 +106,6 @@ export default async function ImprovementPlansPage() {
                 <tbody className="divide-y divide-border">
                   {plans.map(plan => {
                     const isOverdue = new Date() > plan.targetDate && plan.status !== "COMPLETED"
-                    // Task 16 (إضافة فقط): المؤشر المرتبط للخطط بلا فجوة — صفوف الفجوات القائمة كما هي حرفيًا
-                    const linkedIndicator = !plan.gap?.indicator && plan.indicatorId ? indicatorLabels.get(plan.indicatorId) : undefined
                     return (
                       <tr key={plan.id} className="hover:bg-surface-muted/50 transition-smooth">
                         <td className="px-6 py-4">
@@ -121,10 +114,10 @@ export default async function ImprovementPlansPage() {
                             {plan.kind === "SUSTAINABILITY" && <Badge variant="info">خطة استدامة</Badge>}
                           </div>
                           {plan.gap?.indicator && (
-                            <p className="text-[12px] text-muted-foreground mt-1">مرتبط بفجوة: <span className="font-mono text-secondary">{plan.gap.indicator.code}</span></p>
+                            <p className="text-[12px] text-muted-foreground mt-1">مرتبطة بفجوة قياس جودة</p>
                           )}
-                          {linkedIndicator && (
-                            <p className="text-[12px] text-muted-foreground mt-1">مرتبط بمؤشر: <span className="font-mono text-secondary">{linkedIndicator.code}</span></p>
+                          {plan.indicatorId && (
+                            <p className="text-[12px] text-muted-foreground mt-1">مرتبطة بمؤشر تقويمي</p>
                           )}
                         </td>
                         <td className="px-6 py-4 hidden md:table-cell text-muted-foreground text-[13px]">{plan.branch?.name ?? "كامل المدرسة"}</td>

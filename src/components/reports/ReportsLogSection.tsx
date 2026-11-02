@@ -1,4 +1,3 @@
-// ===== FILE: src/components/reports/ReportsLogSection.tsx =====
 // ============================================================
 // ReportsLogSection — القسم الأول من تقارير مدير النظام: «سجل التقارير»
 // ============================================================
@@ -149,6 +148,7 @@ export function ReportsLogSection({
     ...EDUCATIONAL_STAGES.map(s => ({ value: s.id, label: s.ar })),
     { value: "UNSPECIFIED", label: "غير محددة" },
   ]
+
   const stageHref = (value: string) => {
     const suffix = filtersQsNoStage ? `&${filtersQsNoStage}` : ""
     return value ? `/reports?stage=${value}${suffix}` : `/reports${filtersQsNoStage ? `?${filtersQsNoStage}` : ""}`
@@ -420,6 +420,12 @@ export function ReportsLogSection({
                     <Link href={`/quality/assessments/${row.id}/results`}>
                       <Button variant="outline" size="sm">عرض التقرير</Button>
                     </Link>
+                    {/* (التحسين 5) طباعة هذا التقرير وحده — تقييم واحد مستقل، بلا دمج */}
+                    {row.isCompleted && (
+                      <Link href={`/reports/print?assessmentId=${row.id}`} target="_blank">
+                        <Button variant="ghost" size="sm">طباعة</Button>
+                      </Link>
+                    )}
                   </div>
                 </li>
               ))}

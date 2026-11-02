@@ -1,4 +1,3 @@
-// ===== FILE: src/app/(dashboard)/improvement-plans/page.tsx =====
 import { prisma } from "@/lib/prisma"
 import { getCurrentUser, getAuthorizedBranchIds } from "@/lib/permissions"
 import { redirect } from "next/navigation"
@@ -9,7 +8,6 @@ import { Button } from "@/components/ui/Button"
 import { Progress } from "@/components/ui/Progress"
 import { Eye, Plus, Printer } from "lucide-react"
 import Link from "next/link"
-import { getIndicatorLabels } from "@/features/improvement-plans/queries"
 import { canViewPlan } from "@/features/improvement-plans/access"
 
 export default async function ImprovementPlansPage() {
@@ -85,9 +83,6 @@ export default async function ImprovementPlansPage() {
     canViewPlan(user, { schoolId: p.schoolId ?? null, branchId: p.branchId ?? null, createdById: p.createdById ?? null }, authorizedBranchIds)
   )
 
-  // Task 16 (إضافة فقط): أكواد المؤشرات للخطط المرتبطة بمؤشر بلا فجوة
-  const indicatorLabels = await getIndicatorLabels(plans.map(p => p.indicatorId ?? "").filter(Boolean))
-
   return (
     <div className="space-y-6">
       <PageHeader
@@ -112,7 +107,6 @@ export default async function ImprovementPlansPage() {
               <thead className="text-[12px] text-muted-foreground bg-surface-muted uppercase">
                 <tr>
                   <th className="px-4 py-3 font-medium">عنوان الخطة</th>
-                  <th className="px-4 py-3 font-medium hidden md:table-cell">المؤشر</th>
                   <th className="px-4 py-3 font-medium hidden lg:table-cell">المدرسة / الفرع</th>
                   <th className="px-4 py-3 font-medium">الحالة</th>
                   <th className="px-4 py-3 font-medium">الإنجاز</th>
@@ -121,9 +115,6 @@ export default async function ImprovementPlansPage() {
               </thead>
               <tbody className="divide-y divide-border">
                 {plans.map((p) => {
-                  const indicatorCode = p.gap?.indicator?.code
-                    ?? (p.indicatorId ? indicatorLabels.get(p.indicatorId)?.code ?? "—" : "—")
-
                   return (
                     <tr key={p.id} className="hover:bg-surface-muted/50">
                       <td className="px-4 py-3 font-medium text-foreground-strong">
@@ -132,9 +123,6 @@ export default async function ImprovementPlansPage() {
                           <Badge variant="info" className="ms-2">خطة استدامة</Badge>
                         )}
                         <p className="text-xs text-muted-foreground mt-1">{p.createdBy?.name}</p>
-                      </td>
-                      <td className="px-4 py-3 hidden md:table-cell text-muted-foreground">
-                        {indicatorCode}
                       </td>
                       <td className="px-4 py-3 hidden lg:table-cell text-muted-foreground">
                         {p.school?.name} {p.branch ? `- ${p.branch.name}` : ""}

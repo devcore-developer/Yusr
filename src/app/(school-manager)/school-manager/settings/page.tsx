@@ -107,7 +107,7 @@ function StageInfoCard({ role, stages }: { role: string; stages: string[] }) {
       <CardContent>
         {unlimited ? (
           <p className="text-sm text-muted-foreground">
-            حسابك غير مقيّد بمراحل محددة — يمكنك العمل في جميع المراحل التعليمية الخمس.
+            حسابك غير مقيّد بمراحل محددة — يمكنك العمل في جميع المراحل التعليمية.
           </p>
         ) : stages.length > 0 ? (
           <div className="flex flex-wrap gap-2">
@@ -128,7 +128,7 @@ function StageInfoCard({ role, stages }: { role: string; stages: string[] }) {
   )
 }
 
-// مكون بيانات المدرسة (لالمدير العام)
+// مكون بيانات المدرسة (للمدير العام)
 async function SchoolSettingsCard({ schoolId }: { schoolId: string }) {
   const school = await prisma.school.findUnique({
     where: { id: schoolId },
