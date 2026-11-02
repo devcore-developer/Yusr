@@ -13,23 +13,23 @@ export function SemiCircleGauge({ percentage, size = 180 }: { percentage: number
 
   return (
     <div className="relative flex flex-col items-center" style={{ width: size, height: (size * 100 / 180) + 40 }}>
-      <svg 
-        width={size} 
-        height={(size * 100) / 180} 
-        viewBox="0 0 180 100" 
+      <svg
+        width={size}
+        height={(size * 100) / 180}
+        viewBox="0 0 180 100"
         className="overflow-visible"
       >
         {/* تم تعديل إحداثيات القوس ليتوسط الـ viewBox مع هامش آمن لسمك الخط */}
         <path d="M 10 90 A 80 80 0 0 1 170 90" fill="none" stroke="#E2E8F0" strokeWidth="12" strokeLinecap="round" />
-        <path 
-          d="M 10 90 A 80 80 0 0 1 170 90" 
-          fill="none" 
-          stroke={color} 
-          strokeWidth="12" 
-          strokeLinecap="round" 
-          strokeDasharray={circumference} 
-          strokeDashoffset={offset} 
-          style={{ transition: 'stroke-dashoffset 1s ease' }} 
+        <path
+          d="M 10 90 A 80 80 0 0 1 170 90"
+          fill="none"
+          stroke={color}
+          strokeWidth="12"
+          strokeLinecap="round"
+          strokeDasharray={circumference}
+          strokeDashoffset={offset}
+          style={{ transition: 'stroke-dashoffset 1s ease' }}
         />
       </svg>
       <div className="absolute inset-0 flex flex-col items-center justify-end pb-2 text-center">
@@ -86,17 +86,43 @@ export function DonutChart({ data }: { data: { label: string, value: number, col
 }
 
 // 3. Vertical Bar Chart (Domain Comparison)
+// ============================================================
+// (إصلاح قصّ التسميات وتداخل البطاقات المجاورة) — التغييرات الأربعة:
+//   1) الجذر h-full بدل h-48 الثابت: الرسم يتبع ارتفاع الصندوق الحاوي،
+//      فلا يفيض خارج البطاقات الضيقة (كان 192px ثابتة فوق صندوق معايير 160px
+//      = فيضان 32px خارج البطاقة هو سبب التداخل مع البطاقة المجاورة).
+//   2) فصل عمود كل عنصر إلى «مساحة أعمدة» (flex-1 min-h-0) يتحرك فيها العمود
+//      بنسبته الصحيحة + «مساحة تسميات» محجوزة (shrink-0) لا تنضغط أبدًا —
+//      فلا تُقص النسبة ولا الاسم مهما كان ارتفاع الصندوق.
+//   3) الاسم بلا truncate — يلتف طبيعيًا لأسطر متعددة ويظل داخل حدود البطاقة
+//      (كان يُعرض «...» ويُقص = مخالف لمتطلب عدم إخفاء أي تسمية).
+//   4) الأعمدة flex-1 متساوية العرض لأي عدد عناصر (4 مجالات أو 6 معايير)
+//      بدل w-1/4 الثابت الذي كان يفيض أفقيًا فوق 4 عناصر، مع سقف عرض 160px
+//      بحيث يظل العمود الواحد أو العنصران بعرض معقول في المنتصف (justify-around).
+// نفس الألوان والنسب والاستدارة والانتقالات وحد أدنى 4px — بلا أي تغيير على منطق العرض.
+// ============================================================
 export function VerticalBarChart({ data }: { data: { name: string, percentage: number | null }[] }) {
   return (
-    <div className="flex justify-around items-end h-48 gap-4 pt-4">
+    <div className="flex h-full w-full justify-around gap-4 pt-4">
       {data.map((d, i) => {
         const pct = d.percentage === null || isNaN(d.percentage as number) ? 0 : d.percentage
         const color = pct >= 90 ? '#16A34A' : pct >= 75 ? '#2878B8' : pct >= 60 ? '#E9A34A' : pct >= 50 ? '#C62828' : '#858B95'
         return (
-          <div key={i} className="flex flex-col items-center gap-2 w-1/4 h-full justify-end">
-            <span className="text-sm font-bold text-slate-900">{pct}%</span>
-            <div className="w-full rounded-t-lg transition-all duration-700" style={{ height: `${pct}%`, backgroundColor: color, minHeight: '4px' }}></div>
-            <span className="text-[11px] text-slate-500 text-center truncate w-full">{d.name}</span>
+          <div key={i} className="flex h-full min-w-0 max-w-[160px] flex-1 flex-col">
+            {/* مساحة الأعمدة — تنضغط ضمن المساحة المتاحة فوق التسميات فقط */}
+            <div className="flex min-h-0 w-full flex-1 flex-col">
+              <span className="mb-2 shrink-0 whitespace-nowrap text-center text-sm font-bold text-slate-900">{pct}%</span>
+              {/* مسار العمود: ارتفاع محسوم = المساحة المتبقية بعد النسبة — العمود مطلق التمركز داخله فلا يفيض أبدًا */}
+              <div className="relative min-h-0 w-full flex-1">
+                <div
+                  className="absolute bottom-0 left-0 right-0 rounded-t-lg transition-all duration-700"
+                  style={{ height: `${pct}%`, backgroundColor: color, minHeight: '4px' }}
+                ></div>
+              </div>
+            </div>
+            {/* التسمية محجوزة دائمًا أسفل العمود — تلتف طبيعيًا ولا تُقص، وbreak-words ضمانة أخيرة
+                بأن أي كلمة مفردة أعرض من العمود الضيق جدًا تنكسر داخل حدوده فلا تلمس عمودًا مجاورًا */}
+            <span className="mt-2 w-full shrink-0 break-words text-center text-[11px] leading-snug text-slate-500">{d.name}</span>
           </div>
         )
       })}

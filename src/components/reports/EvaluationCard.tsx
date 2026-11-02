@@ -94,7 +94,10 @@ export function EvaluationCard({
         {/* Domain comparison chart + weights */}
         <div className="min-w-0">
           {domainResults.length > 0 && (
-            <div style={{ height: "220px", width: "100%" }}>
+            // (إصلاح قصّ التسميات) ارتفاع مزيد من مساحة الأمان حتى تظل أسماء المجالات
+            // أسفل الأعمدة ظاهرة بالكامل — الإصلاح الجذري لداخل VerticalBarChart يتبع
+            // بعد استلام AnalyticsCharts.tsx (الالتفاف الطبيعي + حجز مساحة التسميات)
+            <div style={{ height: "260px", width: "100%" }}>
               <VerticalBarChart data={chartData} />
             </div>
           )}
@@ -104,7 +107,9 @@ export function EvaluationCard({
                 key={d.name}
                 className="flex items-center justify-between gap-2 rounded-lg border border-[#eef1f6] bg-white px-3 py-2"
               >
-                <span className="min-w-0 truncate text-[13px] font-medium text-[#172B36]">{d.name}</span>
+                {/* (إصلاح القص) بلا truncate — اسم المجال يلتف طبيعيًا لأكثر من سطر
+                    ويظل داخل حدود البطاقة، والأرقام والوزن ثابتة لا تنضغط */}
+                <span className="min-w-0 text-[13px] font-medium leading-snug text-[#172B36]">{d.name}</span>
                 <span className="flex shrink-0 items-center gap-2">
                   <span className="text-[13px] font-bold numeric" style={{ color: "#073B43" }}>
                     {d.score !== null ? `${d.score}%` : "—"}

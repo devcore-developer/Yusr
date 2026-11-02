@@ -375,7 +375,7 @@ function AssessmentBlock({ assessment, order, officialDomains, totalRequired, li
       <div style={{ display: "flex", flexWrap: "wrap", gap: "20px", marginBottom: "24px" }}>
         <div style={{ flex: "1 1 300px", minWidth: 0 }}>
           <h4 style={{ fontSize: "14px", fontWeight: "bold", color: "#073B43", marginBottom: "12px", borderRight: "3px solid #2878B8", paddingRight: "8px" }}>أداء المجالات</h4>
-          <div style={{ height: "200px", width: "100%" }}><VerticalBarChart data={domainChartData} /></div>
+          <div style={{ height: "300px", width: "100%" }}><VerticalBarChart data={domainChartData} /></div>
         </div>
         <div style={{ flex: "0 0 220px", maxWidth: "100%" }}>
           <h4 style={{ fontSize: "14px", fontWeight: "bold", color: "#073B43", marginBottom: "12px", borderRight: "3px solid #2878B8", paddingRight: "8px" }}>توزيع الأداء</h4>
@@ -455,7 +455,7 @@ function CriteriaSection({ criteriaGroups }: { criteriaGroups: WeightedAssessmen
               </span>
             </div>
             {group.criteria.length > 0 ? (
-              <div style={{ height: "160px", width: "100%" }}>
+              <div style={{ height: "210px", width: "100%" }}>
                 <VerticalBarChart data={group.criteria.map(c => ({ name: c.axisName || "محور", percentage: c.score }))} />
               </div>
             ) : (
