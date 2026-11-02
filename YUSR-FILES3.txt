@@ -453,6 +453,9 @@ model Survey {
   createdAt     DateTime @default(now())
 
   school        School?  @relation(fields: [schoolId], references: [id], onDelete: SetNull)
+  assessmentId String?
+  assessment   Assessment? @relation(fields: [assessmentId], references: [id], onDelete: SetNull)
+  @@index([assessmentId])
 }
 
 model BackupHistory {

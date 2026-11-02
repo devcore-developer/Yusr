@@ -1,3 +1,15 @@
+// ============================================================
+// /school-manager dashboard — لوحة مدير المدرسة / مدير القسم
+// ============================================================
+// رسم «أداء المجالات» أُزيل من هذه اللوحة كلها (قسم المدرسة وقسم مدير القسم)
+// بطلب الإدارة بعد إصلاح تضخّمه السابق 466%/868%/565%/418% — نسب المجالات
+// متاحة من المصدر المشترك نفسه (weighted-score.ts) في بطاقة التقويم الرسمية
+// ولوحة مدير النظام وتقارير الطباعة، ولا يُعاد حسابها هنا إطلاقًا.
+// باقي اللوحة (المؤشرات، مقارنة الفروع، الفجوات، النشاطات، خطط التحسين)
+// كما هي دون أي مساس — مصادرها القائمة لم تُلمس.
+// القراءة فقط: لا أي كتابة أو تعديل بيانات في هذه الصفحة.
+// ============================================================
+
 import { prisma } from "@/lib/prisma"
 import { getCurrentUser } from "@/lib/permissions"
 import { redirect } from "next/navigation"
@@ -9,10 +21,9 @@ import { RecentActivity } from "@/components/dashboard/RecentActivity"
 import { Button } from "@/components/ui/Button"
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/Card"
 import { Badge } from "@/components/ui/Badge"
-import { VerticalBarChart, HorizontalBarChart } from "@/components/charts/AnalyticsCharts"
+import { HorizontalBarChart } from "@/components/charts/AnalyticsCharts"
 import { Building2, Users, ClipboardCheck, AlertTriangle, RefreshCw, TrendingUp, FileCheck, ArrowLeft } from "lucide-react"
 import { getSchoolAnalytics, getBranchAnalytics } from "@/features/quality-reports/services/analytics"
-import { getPerformanceBand } from "@/features/quality-assessment/services/analysis"
 
 export default async function SchoolManagerDashboard() {
   const user = await getCurrentUser()
@@ -25,7 +36,7 @@ export default async function SchoolManagerDashboard() {
     // استخدام دالة التجميع الموحدة لحساب الأداء
     const perf = await getBranchAnalytics(user.branchId)
 
-    const [usersCount, recentAssessmentsRaw, branchGaps, delayedPlans, recentActivities, domains, verifiedEvidence] = await Promise.all([
+    const [usersCount, recentAssessmentsRaw, branchGaps, delayedPlans, recentActivities] = await Promise.all([
       prisma.user.count({ where: { branchId: user.branchId } }),
       prisma.assessment.findMany({
         where: { branchId: user.branchId, type: "NORMAL" }, take: 5, orderBy: { startedAt: "desc" },
@@ -42,18 +53,7 @@ export default async function SchoolManagerDashboard() {
         where: { branchId: user.branchId }, take: 5, orderBy: { createdAt: "desc" },
         include: { actor: { select: { name: true } } }
       }),
-      prisma.domain.findMany({ include: { indicators: { include: { fixedEvidence: true } } } }),
-      prisma.evidenceResponse.findMany({
-        where: { isVerified: true, assessment: { branchId: user.branchId, type: "NORMAL", status: { in: ["IN_PROGRESS", "COMPLETED"] } } },
-        include: { evidence: { include: { indicator: { include: { domain: true } } } } }
-      })
     ])
-
-    const domainPerformance = domains.map(d => {
-      const req = d.indicators.reduce((acc, i) => acc + i.fixedEvidence.length, 0)
-      const ver = verifiedEvidence.filter(v => v.evidence.indicator.domain.id === d.id).length
-      return { name: d.name, percentage: req > 0 ? Math.round((ver / req) * 100) : null }
-    })
 
     return (
       <div className="space-y-6 lg:space-y-8">
@@ -74,15 +74,6 @@ export default async function SchoolManagerDashboard() {
             tone="success" 
           />
         </div>
-
-        <Card className="p-6">
-          <CardHeader className="px-0 pt-0">
-            <CardTitle>أداء المجالات في الفرع</CardTitle>
-          </CardHeader>
-          <CardContent className="px-0">
-            <VerticalBarChart data={domainPerformance} />
-          </CardContent>
-        </Card>
 
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 lg:gap-6">
           <div className="lg:col-span-2">
@@ -156,7 +147,7 @@ export default async function SchoolManagerDashboard() {
 
   const [
     school, branchesCount, usersCount, openGaps, totalGaps, recentAssessmentsRaw, recentActivities,
-    delayedPlans, domains, verifiedEvidence
+    delayedPlans
   ] = await Promise.all([
     prisma.school.findUnique({ where: { id: schoolId }, select: { name: true, status: true } }),
     prisma.branch.count({ where: { schoolId } }),
@@ -174,20 +165,9 @@ export default async function SchoolManagerDashboard() {
     prisma.improvementPlan.findMany({
       where: { schoolId, targetDate: { lt: new Date() }, status: { not: "COMPLETED" } }, take: 5,
     }),
-    prisma.domain.findMany({ include: { indicators: { include: { fixedEvidence: true } } } }),
-    prisma.evidenceResponse.findMany({
-      where: { assessment: { schoolId, type: "NORMAL", status: { in: ["IN_PROGRESS", "COMPLETED"] } }, isVerified: true },
-      select: { evidence: { select: { indicator: { select: { domain: { select: { id: true, name: true } } } } } } },
-    })
   ])
 
   if (!school) return null
-
-  const domainPerformance = domains.map(d => {
-    const req = d.indicators.reduce((acc, i) => acc + i.fixedEvidence.length, 0)
-    const ver = verifiedEvidence.filter(v => v.evidence.indicator.domain.id === d.id).length
-    return { name: d.name, percentage: req > 0 ? Math.round((ver / req) * 100) : null }
-  })
 
   // تجميع بيانات مقارنة الفروع بناءً على البيانات الموحدة
   const branchStatsMap = new Map<string, { name: string, assessments: number, score: number }>()
@@ -241,24 +221,14 @@ export default async function SchoolManagerDashboard() {
         />
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 lg:gap-6">
-        <Card className="p-6">
-          <CardHeader className="px-0 pt-0">
-            <CardTitle>أداء المجالات</CardTitle>
-          </CardHeader>
-          <CardContent className="px-0">
-            <VerticalBarChart data={domainPerformance} />
-          </CardContent>
-        </Card>
-        <Card className="p-6">
-          <CardHeader className="px-0 pt-0">
-            <CardTitle>تقدم التقييم في الفروع</CardTitle>
-          </CardHeader>
-          <CardContent className="px-0">
-            <HorizontalBarChart data={branchComparisonData} />
-          </CardContent>
-        </Card>
-      </div>
+      <Card className="p-6">
+        <CardHeader className="px-0 pt-0">
+          <CardTitle>تقدم التقييم في الفروع</CardTitle>
+        </CardHeader>
+        <CardContent className="px-0">
+          <HorizontalBarChart data={branchComparisonData} />
+        </CardContent>
+      </Card>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 lg:gap-6">
         <div className="lg:col-span-2">

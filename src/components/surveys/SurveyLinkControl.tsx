@@ -33,17 +33,21 @@ export function SurveyLinkControl({ surveyId, currentIndicatorId, indicators, ca
 
   const save = () => {
     setError(null)
-    startTransition(async () => {
-      const res = await linkSurveyToIndicator({
-        surveyId,
-        indicatorId: selected === "" ? null : selected,
-      })
-      if (!res.success) {
-        setError(res.error ?? "تعذر حفظ الربط.")
-        return
-      }
-      setOpen(false)
-      router.refresh()
+    // (توافق الأنواع الصارمة) startTransition في أنواع React 18 يقبل دالة متزامنة حصرًا —
+    // الـPromise يُطلق fire-and-forget بنفس سلوك React 18 وقت التشغيل، والسلوك كما هو.
+    startTransition(() => {
+      void (async () => {
+        const res = await linkSurveyToIndicator({
+          surveyId,
+          indicatorId: selected === "" ? null : selected,
+        })
+        if (!res.success) {
+          setError(res.error ?? "تعذر حفظ الربط.")
+          return
+        }
+        setOpen(false)
+        router.refresh()
+      })()
     })
   }
 

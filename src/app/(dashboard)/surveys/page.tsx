@@ -1,3 +1,4 @@
+// ===== FILE: src/app/(dashboard)/surveys/page.tsx =====
 import { prisma } from "@/lib/prisma"
 import { getCurrentUser } from "@/lib/permissions"
 import { redirect } from "next/navigation"
@@ -10,12 +11,20 @@ import { Button } from "@/components/ui/Button"
 import { addSurvey } from "@/features/landing/actions"
 import { saveSurveyIntegrationConfig, deleteSurveyIntegrationConfig } from "@/features/survey-integration/actions"
 import { SurveyLinkControl } from "@/components/surveys/SurveyLinkControl"
+import { SurveyAssessmentControl } from "@/components/surveys/SurveyAssessmentControl"
+import { getEligibleAssessmentsForUser } from "@/features/survey-integration/assessment-link.server"
+import { buildAssessmentOption, buildAssessmentShortLabel, HISTORICAL_SURVEY_ASSESSMENT_LABEL } from "@/features/survey-integration/assessment-link"
 import { BarChart2, Link2, Settings2 } from "lucide-react"
 import { weightsLabel } from "@/features/quality-reports/services/survey-integration"
 
 async function handleAddSurvey(formData: FormData) {
   "use server"
-  await addSurvey(formData)
+  // (ربط الاستبانات بالتقييم) أخطاء التحقق الخادمي (إلزامية التقييم / النطاق / صحة البيانات)
+  // لا تُبتلع بصمت — تُعاد الصفحة برسالة عربية واضحة عبر ?err= يعرضها تنبيه فوق النموذج
+  const res = await addSurvey(formData)
+  if (res && "error" in res && res.error) {
+    redirect(`/surveys?err=${encodeURIComponent(res.error)}`)
+  }
 }
 
 async function handleSaveConfig(formData: FormData) {
@@ -35,12 +44,33 @@ async function handleDeleteConfig(formData: FormData) {
   await deleteSurveyIntegrationConfig(schoolId)
 }
 
-export default async function SurveysPage({ searchParams }: { searchParams: { indicatorId?: string } }) {
+export default async function SurveysPage({ searchParams }: { searchParams: { indicatorId?: string; err?: string } }) {
   const user = await getCurrentUser()
   if (!user) redirect("/login")
 
   const where = user.role === "SUPER_ADMIN" ? {} : { schoolId: user.schoolId }
-  const surveys = await prisma.survey.findMany({ where, orderBy: { createdAt: "desc" } })
+  // (ربط الاستبانات بالتقييم) علاقة التقييم المخزّنة تُحمّل مع القائمة للعرض والرابط
+  const surveys = await prisma.survey.findMany({
+    where,
+    orderBy: { createdAt: "desc" },
+    include: {
+      assessment: {
+        select: {
+          id: true, status: true, stage: true, startedAt: true,
+          school: { select: { name: true } },
+          branch: { select: { name: true } },
+          academicYear: { select: { label: true } },
+        },
+      },
+    },
+  })
+
+  // (ربط الاستبانات بالتقييم) خيارات «التقييم المرتبط» — ضمن نطاق المستخدم فقط
+  // (نفس نطاق القائمة أعلاه: SA كل المدارس، وإلا مدرسته) — وبلا خيارات لا يُسمح بالحفظ
+  const eligibleAssessments = await getEligibleAssessmentsForUser({ role: user.role, schoolId: user.schoolId ?? null })
+  const assessmentOptions = eligibleAssessments.map(buildAssessmentOption)
+  // خيارات تحكم إعادة الإسناد في القائمة — المكوّن يقيّدها بمدرسة كل استبانة (والتحقق الخادمي أشد)
+  const assessmentControlOptions = assessmentOptions.map((o) => ({ id: o.value, schoolId: o.schoolId, label: o.label }))
 
   const evidenceRecords = await prisma.fixedEvidence.findMany({
     select: { text: true, tool: true },
@@ -82,6 +112,14 @@ export default async function SurveysPage({ searchParams }: { searchParams: { in
         description="إدارة نتائج الاستبانات الخارجية (الطلاب، المعلمين، أولياء الأمور) وربطها ببنود إطار التقويم."
         breadcrumbs={[{ label: 'الرئيسية', href: '/' }, { label: 'نتائج الاستبانات' }]}
       />
+
+      {/* (ربط الاستبانات بالتقييم) رسالة رفض التحقق الخادمي عند إنشاء استبانة —
+          واضحة وفوق النموذج مباشرة (تأتي من ?err= بعد redirect معالج الإرسال) */}
+      {searchParams.err && (
+        <div className="rounded-lg border border-danger/20 bg-danger/5 px-4 py-3 text-[13px] text-danger leading-relaxed">
+          {searchParams.err}
+        </div>
+      )}
 
       {/* (جديد) إعداد النتيجة المدمجة — لمدير النظام/مدير المدرسة فقط، والتحقق الفعلي على الخادم.
           بلا إعداد معتمد تبقى النتيجة المدمجة «غير مُهيَّأة» في كل العروض، والنتيجة الرسمية لا تتأثر إطلاقًا. */}
@@ -160,6 +198,31 @@ export default async function SurveysPage({ searchParams }: { searchParams: { in
         <CardContent className="p-6 min-w-0">
           <h3 className="text-base font-bold mb-4">إضافة نتيجة استبانة</h3>
           <form action={handleAddSurvey} className="space-y-4 min-w-0">
+            {/* (ربط الاستبانات بالتقييم) الحقل الإلزامي: كل استبانة تخص تقييمًا واحدًا محددًا —
+                تُحسب نتائجها في تقرير ذلك التقييم حصرًا، والتحقق الفعلي على الخادم.
+                بلا تقييمات متاحة ضمن النطاق تُعرض رسالة واضحة ويُمنع الحفظ إطلاقًا. */}
+            <div className="space-y-1.5">
+              <label className="text-[13px] font-medium text-foreground-strong">
+                التقييم المرتبط (إلزامي — نتائج الاستبانة تُحسب لهذا التقييم حصرًا)
+              </label>
+              {assessmentOptions.length === 0 ? (
+                <p className="text-[13px] text-danger bg-danger/5 border border-danger/20 rounded-lg px-3 py-2 leading-relaxed">
+                  لا توجد تقييمات متاحة ضمن نطاقك بعد — أنشئ تقييمًا جديدًا أولًا، فلا يمكن حفظ استبانة بدون تقييم مرتبط بها.
+                </p>
+              ) : (
+                <Select name="assessmentId" required>
+                  <SelectTrigger className="w-full">
+                    <SelectValue placeholder="اختر التقييم المرتبط بهذه الاستبانة" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {assessmentOptions.map((o) => (
+                      <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              )}
+            </div>
+
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
               <div className="space-y-1.5">
                 <label className="text-[13px] font-medium text-foreground-strong">نوع الاستبانة</label>
@@ -242,7 +305,8 @@ export default async function SurveysPage({ searchParams }: { searchParams: { in
               <label htmlFor="include" className="text-[13px] font-medium text-foreground-strong">تضمين النسبة في تجميع المؤشر عند ربطها بمؤشر</label>
             </div>
 
-            <Button type="submit">إضافة النتيجة</Button>
+            {/* (ربط الاستبانات بالتقييم) بلا خيارات نطاق → لا حفظ إطلاقًا (منع واضح مسبق لا رسالة خطأ لاحقة) */}
+            <Button type="submit" disabled={assessmentOptions.length === 0}>إضافة النتيجة</Button>
           </form>
         </CardContent>
       </Card>
@@ -294,11 +358,36 @@ export default async function SurveysPage({ searchParams }: { searchParams: { in
                         الاستجابات المسجلة: {typeof s.respondents === "number" ? s.respondents : "غير مسجل"}
                       </span>
                     </p>
+                    {/* (ربط الاستبانات بالتقييم) التقييم المخزّن + رابط فتح نتائجه —
+                        السجلات التاريخية بلا إسناد تظهر بشارة واضحة بلا أي ربط مُختلَع */}
+                    <p className="text-xs mt-1">
+                      {s.assessment ? (
+                        <span className="text-secondary font-medium">
+                          مرتبطة بتقييم: {buildAssessmentShortLabel({ status: s.assessment.status, stage: s.assessment.stage, startedAt: s.assessment.startedAt })}
+                          {" "}
+                          <a href={`/quality/assessments/${s.assessment.id}/results`} className="text-secondary hover:underline font-normal">
+                            (فتح نتائج التقييم)
+                          </a>
+                        </span>
+                      ) : (
+                        <span className="text-muted-foreground">{HISTORICAL_SURVEY_ASSESSMENT_LABEL}</span>
+                      )}
+                    </p>
                     <div className="mt-2">
                       <SurveyLinkControl
                         surveyId={s.id}
                         currentIndicatorId={s.indicatorId}
                         indicators={indicators}
+                        canManage={canManage}
+                      />
+                    </div>
+                    {/* (ربط الاستبانات بالتقييم) إسناد/فك إسناد مصرح له فقط — التحقق الخادمي أشد من العرض */}
+                    <div className="mt-1">
+                      <SurveyAssessmentControl
+                        surveyId={s.id}
+                        currentAssessmentId={s.assessmentId}
+                        surveySchoolId={s.schoolId}
+                        assessments={assessmentControlOptions}
                         canManage={canManage}
                       />
                     </div>

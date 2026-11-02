@@ -1,13 +1,13 @@
-// ===== FILE: src/components/reports/EvaluationCard.tsx =====
 // ============================================================
 // EvaluationCard — «بطاقة التقويم المدرسي / الأداء العام للمدرسة»
 // ============================================================
 // Server-safe presentational component (no state, no client hooks).
 // Reuses the platform's existing chart components (AnalyticsCharts)
 // and renders the CLIENT-SPECIFIED structure:
-//   1. Semircular gauge + overall WEIGHTED percentage (one source of truth —
-//      the number and the gauge render the same authoritative value).
-//   2. Performance classification chip + its official explanatory text.
+//   1. Semi-circular gauge — renders the overall WEIGHTED percentage AND the
+//      performance classification label INTERNALLY (each displayed exactly
+//      once — the card adds no duplicate percentage or classification badge).
+//   2. The official explanatory text of the active classification only.
 //   3. Four-domain comparison chart (existing VerticalBarChart).
 //   4. Domain percentages WITH their official weights (20/30/40/10) —
 //      weights are clearly separated from achieved scores.
@@ -30,17 +30,6 @@ export interface EvaluationCardDomain {
 
 function weightLabel(weight: number | null): string {
   return weight === null ? "غير مشمول بالأوزان" : `الوزن: ${Math.round(weight * 100)}%`
-}
-
-function ClassificationChip({ level }: { level: PerformanceLevel }) {
-  return (
-    <span
-      className="inline-flex items-center rounded-full px-3 py-1 text-[13px] font-bold"
-      style={{ backgroundColor: `${level.color}1A`, color: level.color }}
-    >
-      {level.label}
-    </span>
-  )
 }
 
 export function EvaluationCard({
@@ -78,20 +67,14 @@ export function EvaluationCard({
       <p className="mb-4 pr-3 text-[12px] text-[#64748B]">{subtitle}</p>
 
       <div className="grid grid-cols-1 gap-5 lg:grid-cols-[280px_minmax(0,1fr)]">
-        {/* Gauge + overall weighted result + classification */}
+        {/* Gauge renders the overall percentage + classification label once —
+            only the explanatory text follows (no duplicate number/badge) */}
         <div className="flex flex-col items-center rounded-lg border border-[#eef1f6] bg-[#f8fafc] p-4 text-center">
           {overall !== null ? (
             <>
               <SemiCircleGauge percentage={overall} size={150} />
-              <div className="mt-1 text-4xl font-bold numeric" style={{ color: "#073B43" }}>
-                {overall}%
-              </div>
-              <p className="mb-2 text-[11px] text-[#64748B]">النسبة المرجحة الكلية</p>
               {classification && (
-                <>
-                  <ClassificationChip level={classification} />
-                  <p className="mt-2 text-[12px] leading-relaxed text-[#475569]">{classification.description}</p>
-                </>
+                <p className="mt-2 text-[12px] leading-relaxed text-[#475569]">{classification.description}</p>
               )}
             </>
           ) : (

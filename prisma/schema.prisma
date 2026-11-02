@@ -258,7 +258,7 @@ model Assessment {
   type          String   @default("NORMAL")
   academicYearId String?
   academicYear   AcademicYear? @relation(fields: [academicYearId], references: [id], onDelete: SetNull)
-
+  surveys        Survey[]
   @@index([assessorId])
   @@index([schoolId, branchId, status])
   @@index([cycle])
@@ -459,15 +459,20 @@ model Survey {
   generalResult String?
   // (تكامل الاستبانات) عدد الاستجابات المسجل يدويًا — null = غير مسجل، لا يُختلع ولا يُصنَّع
   respondents   Int?
+  // (ربط الاستبانات بالتقييم) التقييم الذي تُحسب له هذه الاستبانة حصرًا — null = سجل تاريخي غير مرتبط
+  assessmentId  String?
   createdAt     DateTime @default(now())
 
   school        School?  @relation(fields: [schoolId], references: [id], onDelete: SetNull)
   // (تكامل الاستبانات) علاقة حقيقية على العمود القائم indicatorId (كان نصيًا بلا علاقة).
   // حذف المؤشر لا يحذف الاستبانة (SetNull) — والسجلات التاريخية تنجو كما هي.
   indicator     Indicator? @relation(fields: [indicatorId], references: [id], onDelete: SetNull)
+  // (ربط الاستبانات بالتقييم) علاقة حقيقية بمعرّف مستقر — حذف التقييم يفك الربط فقط (SetNull)
+  assessment    Assessment? @relation(fields: [assessmentId], references: [id], onDelete: SetNull)
 
   @@index([schoolId])
   @@index([indicatorId])
+  @@index([assessmentId])
 }
 
 // (تكامل الاستبانات) إعداد النتيجة المدمجة — صف واحد لكل مدرسة

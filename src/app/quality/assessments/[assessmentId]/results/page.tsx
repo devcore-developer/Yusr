@@ -1,3 +1,4 @@
+// ===== FILE: src/app/quality/assessments/[assessmentId]/results/page.tsx =====
 import { prisma } from "@/lib/prisma"
 import { getCurrentUser, assertAssessmentAccess, getStageEditPolicy } from "@/lib/permissions"
 import { redirect } from "next/navigation"
@@ -16,7 +17,10 @@ import { StageEditor } from "@/features/quality-assessment/components/StageEdito
 import { AcademicYearBadge } from "@/components/academic-years/AcademicYearBadge"
 import { SurveyComparisonTable } from "@/components/reports/SurveyComparisonTable"
 import { buildItemComparison } from "@/features/quality-reports/services/survey-integration"
-import { getSurveyIntegrationConfig, getSchoolLinkedSurveysByIndicator } from "@/features/quality-reports/services/survey-integration.server"
+import { getSurveyIntegrationConfig } from "@/features/quality-reports/services/survey-integration.server"
+// (ربط الاستبانات بالتقييم) استبانات هذا التقييم حصرًا — بالعلاقة المخزّنة assessmentId،
+// لا بمستوى المدرسة: استبانة تقييم (أ) لا تظهر أبدًا في تقرير تقييم (ب) حتى لنفس المدرسة
+import { getAssessmentLinkedSurveysByIndicator } from "@/features/survey-integration/assessment-link.server"
 
 export default async function AssessmentResultsPage({ params }: { params: { assessmentId: string } }) {
   const user = await getCurrentUser()
@@ -56,13 +60,15 @@ export default async function AssessmentResultsPage({ params }: { params: { asse
 
   // (جديد) بيانات مقارنة البنود المرتبطة باستبانات — كل الأرقام من الخدمة النقية
   // survey-integration.ts: درجة الأدوات بنفس معادلة جداول المجالات، ونتيجة الاستبانة
-  // من الربط الصريح بالمعرّفات لهذه المدرسة فقط، والمدمجة غير رسمية ولا تعود إلا بإعداد معتمد.
+  // من الربط الصريح بالمعرّفات، والمدمجة غير رسمية ولا تعود إلا بإعداد معتمد.
+  // (ربط الاستبانات بالتقييم) الاستبانات تُقرأ بعلاقة هذا التقييم المخزّنة (assessmentId)
+  // حصرًا — لا بمستوى المدرسة: كل استبانة تخص تقييمًا واحدًا محددًا ولا تعبر إلى غيره.
   const [officialDomains, surveyConfig, linkedSurveysByIndicator] = await Promise.all([
     prisma.domain.findMany({
       include: { indicators: { include: { fixedEvidence: true } } },
     }),
     getSurveyIntegrationConfig(assessment.schoolId),
-    getSchoolLinkedSurveysByIndicator(assessment.schoolId),
+    getAssessmentLinkedSurveysByIndicator(assessment.id),
   ])
   const comparison = buildItemComparison({
     officialDomains,
@@ -73,11 +79,12 @@ export default async function AssessmentResultsPage({ params }: { params: { asse
 
   return (
     // (إطار العرض على مستوى الصفحة) حزام أمان مستقل عن هيكل التطبيق:
-    // توسيط المحتوى بعرض أقصى 960px من داخل الصفحة نفسها، فتظهر بهوامش متوازنة
+    // توسيط المحتوى بعرض أقصى 1200px من داخل الصفحة نفسها (Task 32: 960 كانت
+    // ضيقة جدًا على المستخدم — 1200 وسط ذهبي بهوامش واضحة بلا إحساس بالضغط)،
     // حتى لو غاب غلاف العرض في AppShell لدى المستخدم (layout مسار /quality).
-    // وإذا وُجد الغلاف فالقيمتان متطابقتان (نطاق /quality/assessments = narrow
-    // 960px في content-width.ts) والتأثير صفري — لا تمدد مطلقًا ولا تكرار هوامش.
-    <div className="mx-auto w-full max-w-[1160px] space-y-6 lg:space-y-8">
+    // وإذا وُجد الغلاف فالقيمتان متطابقتان (نتائج التقييم = medium 1200px في
+    // content-width.ts) والتأثير صفري — لا تمدد مطلقًا ولا تكرار هوامش.
+    <div className="mx-auto w-full max-w-[1200px] space-y-6 lg:space-y-8">
       <PageHeader
         title="نتائج التقييم"
         description={`${assessment.school.name} — ${assessment.branch?.name ?? "كامل المدرسة"}`}
