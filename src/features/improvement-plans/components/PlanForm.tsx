@@ -6,6 +6,7 @@ import { Input } from "@/components/ui/Input"
 import { Textarea } from "@/components/ui/Textarea"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/Select"
 import { savePlan } from "../actions"
+import PlanEvidenceUploader from "./PlanEvidenceUploader"
 import { Loader2, Save, PlusCircle, Trash2 } from "lucide-react"
 
 interface PlanFormProps {
@@ -243,7 +244,8 @@ export function PlanForm({ plan, gap }: PlanFormProps) {
           <Textarea name="followUpMethod" rows={2} defaultValue={plan?.followUpMethod} />
         </div>
       </div>
-
+      {/* (التحسين 8 — إضافة فقط) رفع الشواهد أثناء إنشاء الخطة — يظهر في الإنشاء فقط، ولا يغيّر أي حقل أو تحقق قائم */}
+      {!plan && <PlanEvidenceUploader />}
       <div className="flex justify-end gap-2 pt-4">
         <Button type="submit" disabled={loading} icon={loading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}>
           {loading ? "جاري الحفظ..." : "حفظ الخطة"}

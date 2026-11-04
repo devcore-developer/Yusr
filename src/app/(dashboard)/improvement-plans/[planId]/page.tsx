@@ -9,6 +9,8 @@ import Link from "next/link"
 import { ArrowRight, CheckCircle, Printer } from "lucide-react"
 import { getIndicatorLabels } from "@/features/improvement-plans/queries"
 import { canViewPlan } from "@/features/improvement-plans/access"
+// (التحسين 7 — إضافة فقط) قسم رفع الشواهد — مكوّن مضاف لا يمس أي قسم قائم
+import { PlanEvidenceUpload } from "@/features/improvement-plans/components/PlanEvidenceUpload"
 
 export default async function ViewImprovementPlanPage({ params }: { params: { planId: string } }) {
   const user = await getCurrentUser()
@@ -23,7 +25,12 @@ export default async function ViewImprovementPlanPage({ params }: { params: { pl
       school: { select: { name: true } },
       branch: { select: { name: true } },
       assessment: { select: { id: true, cycle: true } },
-      createdBy: { select: { name: true } }
+      createdBy: { select: { name: true } },
+      // (التحسين 7 — إضافة فقط) شواهد الخطة — بيانات العرض فقط بلا محتوى الملفات
+      evidences: {
+        select: { id: true, fileName: true, fileType: true, fileSize: true, createdAt: true },
+        orderBy: { createdAt: "desc" }
+      }
     }
   })
 
@@ -63,6 +70,14 @@ export default async function ViewImprovementPlanPage({ params }: { params: { pl
     : undefined
   // Task 16 (إضافة فقط): تسمية نوع الخطة — خطط التحسين القائمة بنفس العنوان السابق حرفيًا
   const planKindLabel = plan.kind === "SUSTAINABILITY" ? "خطة استدامة" : "خطة تحسين"
+
+  // (التحسين 7 — إضافة فقط) الرفع لمقيّم الجودة مالك الخطة حصريًا — نفس بوابة isOwner
+  // القائمة أعلاه حرفيًا؛ باقي الأدوار المصرح لها بالعرض ترى القائمة وتنزّل فقط
+  const canUploadEvidence = user.role === "QUALITY_ASSESSOR" && plan.createdById === user.id
+  const evidenceRows = plan.evidences.map((e) => ({
+    id: e.id, fileName: e.fileName, fileType: e.fileType, fileSize: e.fileSize,
+    createdAt: e.createdAt.toISOString(),
+  }))
 
   return (
     <div className="space-y-6">
@@ -196,6 +211,13 @@ export default async function ViewImprovementPlanPage({ params }: { params: { pl
           </CardContent>
         </Card>
       </div>
+
+      {/* (التحسين 7 — إضافة فقط) رفع الشواهد — بطاقة مستقلة بنفس نمط بطاقات الصفحة */}
+      <Card>
+        <CardContent className="p-6">
+          <PlanEvidenceUpload planId={plan.id} canUpload={canUploadEvidence} initialEvidence={evidenceRows} />
+        </CardContent>
+      </Card>
 
       {isReadOnly && (
         <div className="bg-blue-50 border border-blue-200 text-blue-800 p-4 rounded-lg flex items-center gap-2 text-sm">

@@ -2477,9 +2477,13 @@ export async function savePlan(formData: FormData) {
   }
 
   try {
+    // (التحسين 8 — إضافة فقط) معرف الخطة المحفوظة يُعاد للواجهة لربط الشواهد المُنتقاة بها
+    // إضافة غير مكسّرة: كل المستدعين القائمين يقرؤون success فقط وتبقى سلوك الحفظ كما هو
+    let savedPlanId: string | null = null
     if (id) {
       await prisma.$transaction(async (tx) => {
         await tx.improvementPlan.update({ where: { id }, data })
+        savedPlanId = id
         await tx.improvementAction.deleteMany({ where: { planId: id } })
         if (actions.length > 0) {
           await tx.improvementAction.createMany({

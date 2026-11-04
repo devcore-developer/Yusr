@@ -81,12 +81,13 @@ model User {
   managedBranches Branch[] @relation("BranchManager")
   assessments   Assessment[]
   activities    Activity[]
-
+  uploadedPlanEvidence ImprovementPlanEvidence[] @relation("UploadedPlanEvidence")
   plansCreated    ImprovementPlan[] @relation("CreatedPlans")
   actionsAssigned ImprovementAction[] @relation("AssignedActions")
   followUpsCreated ImprovementFollowUp[] @relation("CreatedFollowUps")
   evidenceUploaded Evidence[] @relation("UploadedEvidence")
   surveyIntegrationConfigs SurveyIntegrationConfig[] @relation("SurveyConfigApprover")
+  pendingEvidence PendingEvidence[]
 
   @@index([schoolId])
   @@index([branchId])
@@ -368,7 +369,7 @@ model ImprovementPlan {
   createdBy     User?    @relation("CreatedPlans", fields: [createdById], references: [id], onDelete: SetNull)
   actions       ImprovementAction[]
   followUps     ImprovementFollowUp[]
-
+  evidences     ImprovementPlanEvidence[]
   @@index([schoolId])
   @@index([gapId])
 }
@@ -573,4 +574,38 @@ model AcademicYear {
 
   @@unique([schoolId, startYear])
   @@index([schoolId, isActive])
+}
+
+model ImprovementPlanEvidence {
+  id           String   @id @default(cuid())
+  planId       String
+  uploadedById String?
+  fileName     String
+  fileType     String
+  fileSize     Int
+  fileData     String
+  createdAt    DateTime @default(now())
+
+  plan     ImprovementPlan @relation(fields: [planId], references: [id], onDelete: Cascade)
+  uploader User?           @relation("UploadedPlanEvidence", fields: [uploadedById], references: [id], onDelete: SetNull)
+
+  @@index([planId])
+}
+
+
+// (التحسين 8 — إضافة فقط) شواهد مؤقتة مرفوعة أثناء إنشاء خطة قبل حفظها
+model PendingEvidence {
+  id          String   @id @default(cuid())
+  fileName    String
+  fileType    String
+  fileSize    Int
+  fileData    String   // data URL (base64) — نفس اتفاقية AssessmentAttachment
+  createdById String
+  createdAt   DateTime @default(now())
+  expiresAt   DateTime // تنظيف تلقائي بعد 24 ساعة إن لم تُربط بخطة
+
+  createdBy User @relation(fields: [createdById], references: [id], onDelete: Cascade)
+
+  @@index([createdById])
+  @@index([expiresAt])
 }

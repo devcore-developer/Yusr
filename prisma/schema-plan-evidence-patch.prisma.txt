@@ -1,0 +1,31 @@
+// ============================================================
+// ترقيع السكيما — التحسين 7: رفع الشواهد داخل خطط التحسين
+// ============================================================
+// إضافة فقط (additive-only): موديل جديد + سطر علاقة في ImprovementPlan
+// + سطر علاقة في User. لا حذف ولا تعديل لأي عمود أو موديل قائم.
+// ============================================================
+
+// ---------- (1) الموديل الجديد — يُضاف بعد موديل AssessmentAttachment ----------
+model ImprovementPlanEvidence {
+  id           String   @id @default(cuid())
+  planId       String
+  uploadedById String?
+  fileName     String
+  fileType     String
+  fileSize     Int
+  fileData     String
+  createdAt    DateTime @default(now())
+
+  plan     ImprovementPlan @relation(fields: [planId], references: [id], onDelete: Cascade)
+  uploader User?           @relation("UploadedPlanEvidence", fields: [uploadedById], references: [id], onDelete: SetNull)
+
+  @@index([planId])
+}
+
+// ---------- (2) داخل موديل ImprovementPlan — أضف سطر العلاقة مع باقي العلاقات ----------
+// (بعد السطر:  followUps     ImprovementFollowUp[]  )
+  evidences    ImprovementPlanEvidence[]
+
+// ---------- (3) داخل موديل User — أضف سطر العلاقة مع باقي علاقات الرفع ----------
+// (بعد السطر:  uploadedAttachments AssessmentAttachment[] @relation("UploadedAttachments")  )
+  uploadedPlanEvidence ImprovementPlanEvidence[] @relation("UploadedPlanEvidence")

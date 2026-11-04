@@ -6,6 +6,7 @@ import { revalidatePath } from "next/cache"
 import { SUSTAINABILITY_THRESHOLD, computeIndicatorEvidenceScore } from "@/features/improvement-plans/queries"
 import { normalizePlanKind } from "@/features/improvement-plans/threshold"
 import { buildEvidencePlanDuplicateWhere } from "@/features/improvement-plans/plan-context"
+import type { Prisma } from "@prisma/client" // (التحسين 8 — إضافة فقط) نوع معاملات Prisma لدالة الربط
 
 export async function savePlan(formData: FormData) {
   const user = await getCurrentUser()
@@ -72,9 +73,13 @@ export async function savePlan(formData: FormData) {
   }
 
   try {
+    // (التحسين 8 — إضافة فقط) معرف الخطة المحفوظة يُعاد للواجهة لربط الشواهد المُنتقاة بها
+    // إضافة غير مكسّرة: كل المستدعين القائمين يقرؤون success فقط وتبقى سلوك الحفظ كما هو
+    let savedPlanId: string | null = null
     if (id) {
       await prisma.$transaction(async (tx) => {
         await tx.improvementPlan.update({ where: { id }, data })
+        savedPlanId = id
         await tx.improvementAction.deleteMany({ where: { planId: id } })
         if (actions.length > 0) {
           await tx.improvementAction.createMany({
@@ -87,10 +92,17 @@ export async function savePlan(formData: FormData) {
             }))
           })
         }
+        // (التحسين 8 — إضافة فقط) ربط الشواهد المؤقتة المرفوعة في النموذج داخل نفس
+        // المعاملة: إما تُحفظ الخطة وكل شواهدها معًا أو لا يُحفظ شيء.
+        // ملاحظة: يعمل فقط إذا وُجدت حقول مخفية باسم pendingEvidenceIds (النموذج المشترك
+        // للإنشاء/التعديل) — بدونها لا يحدث شيء إطلاقًا. لقصر الميزة على الإنشاء فقط،
+        // احذف هذا الاستدعاء من فرع التعديل وحده.
+        await associatePendingEvidenceWithPlan(tx, id, formData.getAll("pendingEvidenceIds"), user.id)
       })
     } else {
       await prisma.$transaction(async (tx) => {
         const plan = await tx.improvementPlan.create({ data })
+        savedPlanId = plan.id
         if (actions.length > 0) {
           await tx.improvementAction.createMany({
             data: actions.map(a => ({
@@ -102,12 +114,15 @@ export async function savePlan(formData: FormData) {
             }))
           })
         }
+        // (التحسين 8 — إضافة فقط) الربط يعتمد على plan.id الناتج من الإنشاء نفسه —
+        // لا يُقبل معرف خطة من العميل أبدًا، فلا يمكن الربط بخطة/مدرسة/فرع خاطئ.
+        await associatePendingEvidenceWithPlan(tx, plan.id, formData.getAll("pendingEvidenceIds"), user.id)
       })
     }
 
     revalidatePath("/school-manager/quality/improvement-plans")
     revalidatePath("/improvement-plans")
-    return { success: true }
+    return { success: true, planId: savedPlanId }
   } catch (error) {
     console.error(error)
     throw new Error("حدث خطأ أثناء حفظ الخطة")
@@ -360,4 +375,186 @@ export async function createEvidencePlan(formData: FormData): Promise<CreateEvid
     console.error(error)
     throw new Error("حدث خطأ أثناء حفظ الخطة")
   }
+}
+
+/* ============================================================
+   (التحسين 8 — إضافة فقط) رفع الشواهد أثناء إنشاء الخطة
+   ------------------------------------------------------------
+   الفكرة: الملفات تُرفع فور اختيارها في النموذج إلى جدول مؤقت
+   PendingEvidence (مملوك للمستخدم الحالي فقط، ولا تظهر في أي صفحة
+   شواهد). عند الضغط على «حفظ» مرة واحدة فقط تُنقل داخل نفس معاملة
+   إنشاء الخطة إلى جدول الشواهد النهائي (PlanEvidence من التحسين 7)
+   وترتبط بمعرف الخطة الناتج من الإنشاء نفسه.
+
+   الضمانات:
+   - QUALITY_ASSESSOR فقط (نفس سلطة savePlan حرفيًا).
+   - 5 ميجابايت + الأنواع المسموحة، بتحقق ثلاثي الطبقات:
+     الامتداد + نوع MIME + التوقيع البايتي لمحتوى الملف (يرفض الملفات
+     المعاد تسميتها مثل exe باسم png).
+   - منع الازدواج: الصفوف المؤقتة تُحذف فور نقلها داخل المعاملة،
+     فلا يمكن ربطها مرتين ولو أُعيد إرسال النموذج.
+   - الأمانة: شواهد التحسين 7 القائمة لا تُمسّ إطلاقًا.
+   - النماذج المُهملة: أي صفوف مؤقتة لم تُربط تخطة تُحذف تلقائيًا
+     بعد 24 ساعة (تنظيف انتهازي عند كل عملية رفع جديدة — بلا cron).
+   - فشل جزئي: ملف يُقبل وملف يُرفض لا يفسد الباقي؛ وفشل إنشاء الخطة
+     يُرجع المعاملة كاملة والشواهد المؤقتة تبقى مملوكة للمستخدم فيمكن
+     إعادة الحفظ مباشرة.
+   ============================================================ */
+
+const PENDING_EVIDENCE_MAX_SIZE = 5 * 1024 * 1024 // 5 ميجابايت
+const PENDING_EVIDENCE_TTL_MS = 24 * 60 * 60 * 1000 // 24 ساعة
+
+const PENDING_EVIDENCE_MIME_BY_KIND: Record<string, string[]> = {
+  png: ["image/png"],
+  jpeg: ["image/jpeg"],
+  pdf: ["application/pdf"],
+  doc: ["application/msword"],
+  docx: ["application/vnd.openxmlformats-officedocument.wordprocessingml.document"],
+  xls: ["application/vnd.ms-excel"],
+  xlsx: ["application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"],
+}
+
+function detectEvidenceKind(fileName: string): string | null {
+  const dot = fileName.lastIndexOf(".")
+  if (dot < 0 || dot === fileName.length - 1) return null
+  const ext = fileName.slice(dot + 1).toLowerCase()
+  if (ext === "png") return "png"
+  if (ext === "jpg" || ext === "jpeg") return "jpeg"
+  if (ext === "pdf") return "pdf"
+  if (ext === "doc") return "doc"
+  if (ext === "docx") return "docx"
+  if (ext === "xls") return "xls"
+  if (ext === "xlsx") return "xlsx"
+  return null
+}
+
+// الطبقة الثالثة من التحقق: التوقيع البايتي (magic bytes) للمحتوى الفعلي
+function hasEvidenceMagicBytes(buf: Buffer, kind: string): boolean {
+  const startsWith = (sig: number[]) => sig.every((b, i) => buf[i] === b)
+  switch (kind) {
+    case "png":
+      return startsWith([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])
+    case "jpeg":
+      return startsWith([0xff, 0xd8, 0xff])
+    case "pdf":
+      return startsWith([0x25, 0x50, 0x44, 0x46]) // %PDF
+    case "docx":
+    case "xlsx":
+      return startsWith([0x50, 0x4b, 0x03, 0x04]) // حاوية ZIP (Office الحديث)
+    case "doc":
+    case "xls":
+      return startsWith([0xd0, 0xcf, 0x11, 0xe0, 0xa1, 0xb1, 0x1a, 0xe1]) // OLE2 (Office القديم)
+    default:
+      return false
+  }
+}
+
+/**
+ * رفع ملف شاهد مؤقت قبل إنشاء الخطة (يُستدعى فور اختيار الملف في النموذج).
+ * النتيجة كائن قابل للتسلسل — متوافقة مع Server Actions.
+ */
+export async function uploadPendingEvidence(
+  formData: FormData
+): Promise<{ success: true; id: string; fileName: string; fileType: string; fileSize: number } | { success: false; error: string }> {
+  const user = await getCurrentUser()
+  if (!user || user.role !== "QUALITY_ASSESSOR") throw new Error("Unauthorized: Only Quality Assessors can upload evidence")
+
+  const file = formData.get("file")
+  if (!(file instanceof File)) return { success: false, error: "لم يتم إرسال أي ملف." }
+  if (file.size === 0) return { success: false, error: "الملف فارغ." }
+  if (file.size > PENDING_EVIDENCE_MAX_SIZE) {
+    return { success: false, error: "حجم الملف يتجاوز الحد الأقصى (5 ميجابايت)." }
+  }
+
+  const fileName = file.name || "ملف بدون اسم"
+  const kind = detectEvidenceKind(fileName)
+  if (!kind) {
+    return { success: false, error: "نوع الملف غير مدعوم. الأنواع المسموحة: PNG, JPG, PDF, DOC, DOCX, XLS, XLSX." }
+  }
+
+  // الطبقة الثانية: نوع MIME المعلن (إن وُجد) يجب أن يطابق الامتداد المسموح
+  const allowedMimes = PENDING_EVIDENCE_MIME_BY_KIND[kind]
+  if (file.type && !allowedMimes.includes(file.type)) {
+    return { success: false, error: "نوع الملف المعلن لا يطابق الامتداد المسموح." }
+  }
+
+  // الطبقة الثالثة: التحقق من المحتوى الفعلي
+  const bytes = Buffer.from(await file.arrayBuffer())
+  if (!hasEvidenceMagicBytes(bytes, kind)) {
+    return { success: false, error: "محتوى الملف لا يطابق نوعه المعلن — تم رفض الرفع." }
+  }
+
+  // تنظيف انتهازي: الشواهد المؤقتة المنتهية الصلاحية (نماذج أُهملت قبل الحفظ)
+  await prisma.pendingEvidence.deleteMany({ where: { expiresAt: { lt: new Date() } } })
+
+  const storedMime = file.type || allowedMimes[0]
+  const created = await prisma.pendingEvidence.create({
+    data: {
+      fileName,
+      fileType: storedMime,
+      fileSize: file.size,
+      fileData: `data:${storedMime};base64,${bytes.toString("base64")}`,
+      createdById: user.id,
+      expiresAt: new Date(Date.now() + PENDING_EVIDENCE_TTL_MS),
+    },
+    select: { id: true },
+  })
+
+  return { success: true, id: created.id, fileName, fileType: storedMime, fileSize: file.size }
+}
+
+/**
+ * إزالة شاهد مؤقت قبل الحفظ (زر «إزالة» في النموذج).
+ * deleteMany بدل delete: لا يفشل إن كان الصف قد نُقل/حُذف — آمن للتكرار.
+ */
+export async function removePendingEvidence(id: string): Promise<{ success: true }> {
+  const user = await getCurrentUser()
+  if (!user || user.role !== "QUALITY_ASSESSOR") throw new Error("Unauthorized")
+
+  await prisma.pendingEvidence.deleteMany({ where: { id, createdById: user.id } })
+  return { success: true }
+}
+
+/**
+ * (تُستدعى من داخل معاملة savePlan فقط)
+ * تنقل الشواهد المؤقتة المملوكة للمستخدم الحالي إلى جدول الشواهد النهائي
+ * وتربطها بالخطة المنشأة في نفس المعاملة، ثم تحذف الصفوف المؤقتة.
+ *
+ * تنبيه مهم — الموضع الوحيد الذي قد يختلف باسم الحقول عندك: كتلة
+ * tx.planEvidence.createMany أدناه. قارنها بموديل PlanEvidence في
+ * schema.prisma عندك؛ إن اختلف اسم حقل (مثلًا createdById بدل
+ * uploadedById) أو كان اسم الموديل نفسه مختلفًا، عدّل هذه الكتلة فقط —
+ * لا شيء غيرها. وإن أردت صفر تخمين: الصق لي موديل PlanEvidence وسأثبت
+ * الأسماء لك فورًا.
+ */
+async function associatePendingEvidenceWithPlan(
+  tx: Prisma.TransactionClient,
+  planId: string,
+  pendingIds: FormDataEntryValue[],
+  userId: string
+): Promise<void> {
+  const ids = pendingIds.map(v => String(v).trim()).filter(Boolean)
+  if (ids.length === 0) return
+
+  // ملكية صارمة: لا يُنقل إلا ما رفعه المستخدم الحالي نفسه — فلا يمكن
+  // ربط شواهد مستخدم آخر، ولا شواهد نُقلت سلفًا (حُذفت عند نقلها).
+  const pendings = await tx.pendingEvidence.findMany({
+    where: { id: { in: ids }, createdById: userId },
+    select: { id: true, fileName: true, fileType: true, fileSize: true, fileData: true },
+  })
+  if (pendings.length === 0) return
+
+  // نفس حقول prisma.improvementPlanEvidence.create في evidence-actions.ts حرفيًا
+  await tx.improvementPlanEvidence.createMany({
+    data: pendings.map(p => ({
+      planId,
+      uploadedById: userId,
+      fileName: p.fileName,
+      fileType: p.fileType,
+      fileSize: p.fileSize,
+      fileData: p.fileData,
+    })),
+  })
+
+  await tx.pendingEvidence.deleteMany({ where: { id: { in: pendings.map(p => p.id) } } })
 }

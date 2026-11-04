@@ -7,6 +7,8 @@ import { Badge, StatusBadge, PriorityBadge } from "@/components/ui/Badge"
 import { Progress } from "@/components/ui/Progress"
 import { Button } from "@/components/ui/Button"
 import { PlanWorkspace } from "@/features/improvement-plans/components/PlanWorkspace"
+// (التحسين 7 — إضافة فقط) قسم رفع الشواهد — مكوّن مضاف لا يمس أي قسم قائم
+import { PlanEvidenceUpload } from "@/features/improvement-plans/components/PlanEvidenceUpload"
 import { getIndicatorLabels } from "@/features/improvement-plans/queries"
 import Link from "next/link"
 import { formatDate } from "@/lib/utils"
@@ -24,7 +26,12 @@ export default async function PlanDetailsPage({ params }: { params: { planId: st
       branch: true,
       gap: { include: { indicator: true } },
       actions: true,
-      followUps: { include: { createdBy: true }, orderBy: { createdAt: "desc" } }
+      followUps: { include: { createdBy: true }, orderBy: { createdAt: "desc" } },
+      // (التحسين 7 — إضافة فقط) شواهد الخطة — بيانات العرض فقط بلا محتوى الملفات
+      evidences: {
+        select: { id: true, fileName: true, fileType: true, fileSize: true, createdAt: true },
+        orderBy: { createdAt: "desc" }
+      }
     } as any
   })
 
@@ -42,6 +49,14 @@ export default async function PlanDetailsPage({ params }: { params: { planId: st
   const isOverdue = new Date() > planData.targetDate && planData.status !== "COMPLETED"
   // Task 16 (إضافة فقط): تسمية نوع الخطة — خطط التحسين القائمة تظهر بنفس النص السابق حرفيًا
   const planKindLabel = planData.kind === "SUSTAINABILITY" ? "خطة استدامة" : "خطة تحسين"
+
+  // (التحسين 7 — إضافة فقط) الرفع لمقيّم الجودة مالك الخطة حصريًا — نفس سلطة savePlan
+  // القائمة (الدور) + ملكية الخطة (createdById) كما في صفحة العرض — بلا أي دور جديد
+  const canUploadEvidence = user.role === "QUALITY_ASSESSOR" && planData.createdById === user.id
+  const evidenceRows = (planData.evidences as any[]).map((e: any) => ({
+    id: e.id, fileName: e.fileName, fileType: e.fileType, fileSize: e.fileSize,
+    createdAt: e.createdAt.toISOString(),
+  }))
 
   return (
     <div className="space-y-6">
@@ -150,6 +165,13 @@ export default async function PlanDetailsPage({ params }: { params: { planId: st
       <Card>
         <CardContent className="p-6">
           <PlanWorkspace plan={planData} />
+        </CardContent>
+      </Card>
+
+      {/* (التحسين 7 — إضافة فقط) رفع الشواهد — بطاقة مستقلة بنفس نمط بطاقات الصفحة */}
+      <Card>
+        <CardContent className="p-6">
+          <PlanEvidenceUpload planId={planData.id} canUpload={canUploadEvidence} initialEvidence={evidenceRows} />
         </CardContent>
       </Card>
     </div>
